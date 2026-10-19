@@ -103,6 +103,14 @@ public class BookingServlet extends HttpServlet {
         String action = request.getParameter("action");
         if (action == null) action = "reserveSlot";
 
+        // CSRF validation for state-changing user actions
+        if (!"expirePending".equals(action) && !"markNotificationRead".equals(action)) {
+            if (!com.parkingsystem.util.CsrfUtil.isValid(request)) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Invalid or missing CSRF token");
+                return;
+            }
+        }
+
         switch (action) {
             case "reserveSlot":
                 handleReserveSlot(request, response);
@@ -139,13 +147,23 @@ public class BookingServlet extends HttpServlet {
         }
     }
 
-    private User getAuthenticatedUser(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    private User getDriverOrSessionUser(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
-        if (session == null || session.getAttribute("user") == null) {
+        if (session == null) return null;
+        User user = (User) session.getAttribute("driverUser");
+        if (user == null) {
+            user = (User) session.getAttribute("user");
+        }
+        return user;
+    }
+
+    private User getAuthenticatedUser(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        User user = getDriverOrSessionUser(request);
+        if (user == null) {
             response.sendRedirect(request.getContextPath() + "/login?msg=auth_required");
             return null;
         }
-        return (User) session.getAttribute("user");
+        return user;
     }
 
     private void showBookingForm(HttpServletRequest request, HttpServletResponse response)
@@ -259,6 +277,12 @@ public class BookingServlet extends HttpServlet {
                 return;
             }
 
+            // Ownership check: User must access only their own bookings
+            if (!user.getUserId().equals(booking.getUserId())) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access denied: You can only check out your own bookings.");
+                return;
+            }
+
             // If already awaiting payment, directly view payment screen
             if (booking.isPaymentPending()) {
                 response.sendRedirect(request.getContextPath() + "/booking?action=payment&bookingId=" + bookingId);
@@ -318,6 +342,12 @@ public class BookingServlet extends HttpServlet {
             }
         }
 
+        // Ownership check: User must only access their own payment screen
+        if (pendingBooking != null && !user.getUserId().equals(pendingBooking.getUserId())) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access denied: You can only view your own payment screen.");
+            return;
+        }
+
         request.setAttribute("pendingBooking", pendingBooking);
         request.getRequestDispatcher("/payment.jsp").forward(request, response);
     }
@@ -334,13 +364,10 @@ public class BookingServlet extends HttpServlet {
         HttpSession session = request.getSession();
         String bookingIdStr = request.getParameter("bookingId");
         String paymentMethod = request.getParameter("paymentMethod");
-        String amountStr = request.getParameter("amount");
 
         int bookingId = 0;
-        double amount = 0.0;
         try {
             bookingId = Integer.parseInt(bookingIdStr);
-            amount = Double.parseDouble(amountStr);
         } catch (Exception ignored) {}
 
         if (paymentMethod == null || paymentMethod.trim().isEmpty()) {
@@ -349,15 +376,33 @@ public class BookingServlet extends HttpServlet {
 
         String txnId = "TXN" + System.currentTimeMillis() + (1000 + random.nextInt(9000));
 
-        Payment payment = new Payment();
-        payment.setBookingId(bookingId);
-        payment.setAmount(amount);
-        payment.setPaymentMethod(paymentMethod);
-        payment.setTransactionId(txnId);
-        payment.setStatus("SUCCESS");
-
         try {
             Booking booking = bookingDAO.getBookingById(bookingId);
+            if (booking == null) {
+                request.setAttribute("errorMessage", "Booking not found.");
+                request.getRequestDispatcher("/payment.jsp").forward(request, response);
+                return;
+            }
+
+            // Ownership check: User can only pay for their own bookings
+            if (!user.getUserId().equals(booking.getUserId())) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access denied: You can only pay for your own bookings.");
+                return;
+            }
+
+            // Recalculate payment amount on the server; never trust the amount sent from the webpage!
+            double verifiedAmount = booking.getTotalAmount();
+            if (verifiedAmount <= 0.0) {
+                double rate = booking.getHourlyRate() > 0 ? booking.getHourlyRate() : 40.0;
+                verifiedAmount = booking.getLiveEstimatedAmount(rate);
+            }
+
+            Payment payment = new Payment();
+            payment.setBookingId(bookingId);
+            payment.setAmount(verifiedAmount);
+            payment.setPaymentMethod(paymentMethod);
+            payment.setTransactionId(txnId);
+            payment.setStatus("SUCCESS");
             boolean finalized = false;
             if (booking != null && (booking.isPaymentPending() || booking.isActive())) {
                 // Exit payment flow (Pay on Exit)
@@ -405,6 +450,12 @@ public class BookingServlet extends HttpServlet {
             if (bookingIdStr != null && !bookingIdStr.trim().isEmpty()) {
                 int bookingId = Integer.parseInt(bookingIdStr);
                 booking = bookingDAO.getBookingById(bookingId);
+                // Ownership check
+                if (booking != null && !user.getUserId().equals(booking.getUserId())) {
+                    out.print("{\"found\":false,\"error\":\"forbidden\"}");
+                    out.flush();
+                    return;
+                }
             } else {
                 booking = bookingDAO.getActiveBookingForUser(user.getUserId());
             }
@@ -429,14 +480,20 @@ public class BookingServlet extends HttpServlet {
                 long secs = elapsedSeconds % 60;
                 String digitalClock = String.format("%02d:%02d:%02d", hrs, mins, secs);
 
+                boolean timerRunning = booking.isActive() && booking.getEntryTime() != null;
+                long entryTimeMillis = (booking.getEntryTime() != null) ? booking.getEntryTime().getTime() : 0L;
+                long bookingTimeMillis = (booking.getBookingTime() != null) ? booking.getBookingTime().getTime() : 0L;
+
                 out.print(String.format(
                         java.util.Locale.US,
-                        "{\"found\":true,\"bookingId\":%d,\"status\":\"%s\",\"slotId\":\"%s\",\"zoneId\":\"%s\",\"entryTime\":%d,\"elapsedSeconds\":%d,\"digitalClock\":\"%s\",\"formatted\":\"%s\",\"hourlyRate\":%.2f,\"baseRate\":%.2f,\"surgeActive\":%b,\"rushHour\":%b,\"offPeak\":%b,\"pricingTier\":\"%s\",\"surgeMultiplier\":%.2f,\"currentAccrued\":%.2f}",
+                        "{\"found\":true,\"bookingId\":%d,\"status\":\"%s\",\"slotId\":\"%s\",\"zoneId\":\"%s\",\"entryTime\":%d,\"bookingTime\":%d,\"timerRunning\":%b,\"elapsedSeconds\":%d,\"digitalClock\":\"%s\",\"formatted\":\"%s\",\"hourlyRate\":%.2f,\"baseRate\":%.2f,\"surgeActive\":%b,\"rushHour\":%b,\"offPeak\":%b,\"pricingTier\":\"%s\",\"surgeMultiplier\":%.2f,\"currentAccrued\":%.2f}",
                         booking.getBookingId(),
                         booking.getStatus(),
                         booking.getSlotId(),
                         booking.getZoneId() != null ? booking.getZoneId() : "",
-                        booking.getEntryTime() != null ? booking.getEntryTime().getTime() : System.currentTimeMillis(),
+                        entryTimeMillis,
+                        bookingTimeMillis,
+                        timerRunning,
                         elapsedSeconds,
                         digitalClock,
                         formatted,
@@ -459,6 +516,7 @@ public class BookingServlet extends HttpServlet {
     private void handleCancelPending(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         HttpSession session = request.getSession();
+        User user = getDriverOrSessionUser(request);
         Integer bookingId = (Integer) session.getAttribute("pendingBookingId");
         if (bookingId == null) {
             String bId = request.getParameter("bookingId");
@@ -469,6 +527,11 @@ public class BookingServlet extends HttpServlet {
 
         if (bookingId != null) {
             try {
+                Booking booking = bookingDAO.getBookingById(bookingId);
+                if (booking != null && user != null && !user.getUserId().equals(booking.getUserId())) {
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access denied.");
+                    return;
+                }
                 bookingDAO.cancelPendingBooking(bookingId);
             } catch (DatabaseException ignored) {}
         }
@@ -594,7 +657,7 @@ public class BookingServlet extends HttpServlet {
                 scheduledArrival = new Timestamp(nowMillis + (15 * 60 * 1000L));
             }
         } else {
-            scheduledArrival = new Timestamp(nowMillis + (15 * 60 * 1000L)); // default 15 mins
+            scheduledArrival = new Timestamp(nowMillis); // Immediate reservation with 15-20 min grace period
         }
 
         try {
@@ -657,7 +720,7 @@ public class BookingServlet extends HttpServlet {
             throws ServletException, IOException {
         response.setContentType("application/json;charset=UTF-8");
         PrintWriter out = response.getWriter();
-        User user = (User) request.getSession().getAttribute("user");
+        User user = getDriverOrSessionUser(request);
         if (user == null) {
             out.print("{\"unread\":0,\"notifications\":[]}");
             return;
@@ -692,7 +755,7 @@ public class BookingServlet extends HttpServlet {
             throws ServletException, IOException {
         response.setContentType("application/json;charset=UTF-8");
         PrintWriter out = response.getWriter();
-        User user = (User) request.getSession().getAttribute("user");
+        User user = getDriverOrSessionUser(request);
         if (user == null) {
             out.print("{\"success\":false}");
             return;
@@ -704,7 +767,8 @@ public class BookingServlet extends HttpServlet {
                 notificationDAO.markAllAsRead(user.getUserId());
             } else if (notifIdStr != null) {
                 int nId = Integer.parseInt(notifIdStr);
-                notificationDAO.markAsRead(nId);
+                // Tenant/user isolated mark as read
+                notificationDAO.markAsReadForUser(nId, user.getUserId());
             }
             out.print("{\"success\":true}");
         } catch (Exception e) {
@@ -746,6 +810,11 @@ public class BookingServlet extends HttpServlet {
         try {
             int bookingId = Integer.parseInt(bookingIdStr);
             Booking booking = bookingDAO.getBookingById(bookingId);
+            // Ownership check: User must own this booking to submit feedback
+            if (booking == null || !user.getUserId().equals(booking.getUserId())) {
+                response.sendRedirect(request.getContextPath() + "/booking?action=myBookings");
+                return;
+            }
             request.setAttribute("booking", booking);
             request.getRequestDispatcher("/feedback.jsp").forward(request, response);
         } catch (Exception e) {
@@ -764,6 +833,13 @@ public class BookingServlet extends HttpServlet {
 
         try {
             int bookingId = Integer.parseInt(bookingIdStr);
+            Booking booking = bookingDAO.getBookingById(bookingId);
+            // Ownership check: User can only submit feedback for their own booking
+            if (booking == null || !user.getUserId().equals(booking.getUserId())) {
+                response.sendRedirect(request.getContextPath() + "/booking?action=myBookings");
+                return;
+            }
+
             int rating = Integer.parseInt(ratingStr);
             if (rating < 1) rating = 1;
             if (rating > 5) rating = 5;

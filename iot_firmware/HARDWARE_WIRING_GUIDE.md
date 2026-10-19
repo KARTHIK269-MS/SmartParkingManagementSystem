@@ -75,7 +75,7 @@ HC-SR04 ECHO (5V)
 2. Open **File > Preferences** and add the ESP32 board manager URL:
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 3. Go to **Tools > Board > Boards Manager**, search for `esp32` and install the package.
-4. Open [`esp32_smart_parking.ino`](file:///C:/Users/LENOVO/smart-parking-system/iot_firmware/esp32/esp32_smart_parking.ino).
+4. Open [`esp32_smart_parking.ino`](esp32/esp32_smart_parking.ino).
 5. Edit line 18 & 19 with your Wi-Fi SSID, Password, and your computer's IP address:
    ```cpp
    const char* WIFI_SSID     = "MyHomeWiFi";

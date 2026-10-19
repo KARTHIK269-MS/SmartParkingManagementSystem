@@ -6,10 +6,10 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host " Building Smart Parking Management System (PRJ_35) " -ForegroundColor Cyan
+Write-Host " Building Smart Parking Management System " -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
 
-$projectDir = "C:\Users\LENOVO\smart-parking-system"
+$projectDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $classesDir = "$projectDir\src\main\webapp\WEB-INF\classes"
 $buildClassesDir = "$projectDir\build\classes"
 $targetDir = "$projectDir\target"
@@ -18,11 +18,32 @@ New-Item -ItemType Directory -Force -Path $classesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $buildClassesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
-$classpath = @(
-    "C:\Program Files\apache-tomcat-9.0.117\lib\servlet-api.jar",
-    "C:\Program Files\apache-tomcat-9.0.117\lib\jsp-api.jar",
-    "$projectDir\src\main\webapp\WEB-INF\lib\mysql-connector-j-9.7.0.jar"
-) -join ";"
+# Resolve Tomcat libraries dynamically
+$tomcatLibPaths = @(
+    "C:\Program Files\apache-tomcat-9.0.117\lib",
+    "C:\apache-tomcat-9.0.117\lib",
+    "$env:CATALINA_HOME\lib"
+)
+
+$servletJar = $null
+$jspJar = $null
+
+foreach ($tPath in $tomcatLibPaths) {
+    if (Test-Path "$tPath\servlet-api.jar") {
+        $servletJar = "$tPath\servlet-api.jar"
+        $jspJar = "$tPath\jsp-api.jar"
+        break
+    }
+}
+
+if (-not $servletJar) {
+    # Check bundled WEB-INF/lib
+    $servletJar = "$projectDir\src\main\webapp\WEB-INF\lib\servlet-api.jar"
+    $jspJar = "$projectDir\src\main\webapp\WEB-INF\lib\jsp-api.jar"
+}
+
+$libJars = Get-ChildItem -Path "$projectDir\src\main\webapp\WEB-INF\lib" -Filter "*.jar" | Select-Object -ExpandProperty FullName
+$classpath = (@($servletJar, $jspJar) + $libJars | Select-Object -Unique) -join ";"
 
 $sources = Get-ChildItem -Path "$projectDir\src\main\java" -Filter "*.java" -Recurse | Select-Object -ExpandProperty FullName
 Write-Host "1. Compiling $($sources.Count) Java 17 source files..." -ForegroundColor Yellow
@@ -32,6 +53,11 @@ Write-Host "1. Compiling $($sources.Count) Java 17 source files..." -ForegroundC
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Compilation failed!" -ForegroundColor Red
     exit 1
+}
+
+# Copy db.properties if exists
+if (Test-Path "$projectDir\db.properties") {
+    Copy-Item -Path "$projectDir\db.properties" -Destination "$classesDir\db.properties" -Force
 }
 
 # Copy to Eclipse build/classes
@@ -48,18 +74,12 @@ Write-Host "[OK] Build Successful! WAR created:" -ForegroundColor Green
 Write-Host "  Path: $($warFile.FullName)" -ForegroundColor Green
 Write-Host "  Size: $([math]::Round($warFile.Length / 1MB, 2)) MB" -ForegroundColor Green
 
-$wtpDir = "C:\Users\LENOVO\eclipse-workspace\main.html\src\.metadata\.plugins\org.eclipse.wst.server.core\tmp1\wtpwebapps\smart-parking-system"
-if (Test-Path $wtpDir) {
+# Optional sync to local Eclipse WTP if present on this machine
+$wtpBase = Join-Path $env:USERPROFILE "eclipse-workspace\main.html\src\.metadata\.plugins\org.eclipse.wst.server.core\tmp1\wtpwebapps\smart-parking-system"
+if (Test-Path $wtpBase) {
     Write-Host "3. Synchronizing to Eclipse Tomcat WTP deployment directory..." -ForegroundColor Yellow
-    Copy-Item -Path "$projectDir\src\main\webapp\*" -Destination "$wtpDir" -Recurse -Force
+    Copy-Item -Path "$projectDir\src\main\webapp\*" -Destination "$wtpBase" -Recurse -Force
     Write-Host "[OK] WTP directory synchronized!" -ForegroundColor Green
 }
 
-$standaloneTomcat = "C:\Program Files\apache-tomcat-9.0.117\webapps"
-if (Test-Path $standaloneTomcat) {
-    try {
-        Copy-Item -Path "$targetDir\smart-parking-system.war" -Destination "$standaloneTomcat" -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Standalone Tomcat webapps synchronized!" -ForegroundColor Green
-    } catch {}
-}
 Write-Host "==================================================" -ForegroundColor Cyan

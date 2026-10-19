@@ -8,6 +8,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class UserDAO {
 
@@ -72,7 +76,7 @@ public class UserDAO {
 
             if (rs.next()) {
                 String storedHash = rs.getString("password");
-                if (storedHash != null && storedHash.equalsIgnoreCase(passwordHash)) {
+                if (com.parkingsystem.util.PasswordHasher.verify(passwordHash, storedHash)) {
                     User user = new User();
                     user.setUserId(rs.getString("user_id"));
                     user.setName(rs.getString("name"));
@@ -144,6 +148,63 @@ public class UserDAO {
             return null;
         } catch (SQLException e) {
             throw new DatabaseException("Error finding user by ID: " + e.getMessage(), e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    /**
+     * Retrieves all registered users in the application.
+     */
+    public List<User> getAllUsers() throws DatabaseException {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        List<User> list = new ArrayList<>();
+        try {
+            conn = DBConnection.getConnection();
+            ps = conn.prepareStatement(
+                    "SELECT user_id, name, email, phone_number, role, created_at FROM users ORDER BY created_at DESC, user_id ASC"
+            );
+            rs = ps.executeQuery();
+            while (rs.next()) {
+                User user = new User();
+                user.setUserId(rs.getString("user_id"));
+                user.setName(rs.getString("name"));
+                user.setEmail(rs.getString("email"));
+                user.setPhoneNumber(rs.getString("phone_number"));
+                user.setRole(rs.getString("role"));
+                user.setCreatedAt(rs.getTimestamp("created_at"));
+                list.add(user);
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new DatabaseException("Error retrieving all users: " + e.getMessage(), e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    /**
+     * Returns a map of user_id -> count of bookings placed by that user.
+     */
+    public Map<String, Integer> getUserBookingCounts() throws DatabaseException {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        Map<String, Integer> counts = new HashMap<>();
+        try {
+            conn = DBConnection.getConnection();
+            ps = conn.prepareStatement(
+                    "SELECT user_id, COUNT(*) AS booking_count FROM bookings GROUP BY user_id"
+            );
+            rs = ps.executeQuery();
+            while (rs.next()) {
+                counts.put(rs.getString("user_id"), rs.getInt("booking_count"));
+            }
+            return counts;
+        } catch (SQLException e) {
+            throw new DatabaseException("Error retrieving user booking counts: " + e.getMessage(), e);
         } finally {
             DBConnection.close(conn, ps, rs);
         }

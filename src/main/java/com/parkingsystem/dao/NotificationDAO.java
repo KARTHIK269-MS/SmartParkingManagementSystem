@@ -126,6 +126,24 @@ public class NotificationDAO {
         }
     }
 
+    public boolean markAsReadForUser(int notificationId, String userId) throws DatabaseException {
+        Connection conn = null;
+        PreparedStatement ps = null;
+
+        try {
+            conn = DBConnection.getConnection();
+            String sql = "UPDATE notifications SET is_read = TRUE WHERE notification_id = ? AND user_id = ?";
+            ps = conn.prepareStatement(sql);
+            ps.setInt(1, notificationId);
+            ps.setString(2, userId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to mark notification as read: " + e.getMessage(), e);
+        } finally {
+            DBConnection.close(conn, ps, null);
+        }
+    }
+
     public boolean markAllAsRead(String userId) throws DatabaseException {
         Connection conn = null;
         PreparedStatement ps = null;

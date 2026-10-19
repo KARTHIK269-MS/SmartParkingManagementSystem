@@ -177,6 +177,10 @@ public class Zone implements Serializable {
         return "Other";
     }
 
+    public String getCity() {
+        return getCityName();
+    }
+
     public String getFacilityName() {
         if (name == null) return "Zone " + zoneId;
         int hyphenIdx = name.indexOf(" - ");

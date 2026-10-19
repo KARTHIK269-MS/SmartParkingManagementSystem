@@ -2,7 +2,10 @@
 <%@ page import="com.parkingsystem.model.User" %>
 <%@ page import="com.parkingsystem.model.Booking" %>
 <%
-    User currentUser = (User) session.getAttribute("user");
+    User currentUser = (User) session.getAttribute("driverUser");
+    if (currentUser == null) {
+        currentUser = (User) session.getAttribute("user");
+    }
     if (currentUser == null) {
         response.sendRedirect(request.getContextPath() + "/login?msg=auth_required");
         return;
@@ -18,17 +21,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Feedback & Rating | Smart Parking System</title>
+    <meta name="description" content="Rate your parking experience and submit feedback for your completed session.">
+    <title>SmartParking | Rate Your Experience</title>
+    <link rel="icon" type="image/svg+xml" href="<%= request.getContextPath() %>/resources/images/favicon.svg">
     <link rel="stylesheet" href="<%= request.getContextPath() %>/resources/css/style.css">
     <style>
         .star-item {
             font-size: 2.2rem;
             cursor: pointer;
             color: #cbd5e1;
-            transition: color 0.2s ease;
+            transition: color 0.15s var(--ease-out-smooth), transform 0.12s var(--ease-out-smooth);
+            display: inline-block;
+            user-select: none;
         }
         .star-item.active, .star-item:hover, .star-item.hovered {
             color: #f59e0b;
+        }
+        .star-item:active {
+            transform: scale(0.9);
         }
         .tag-pill {
             display: inline-block;
@@ -37,10 +47,17 @@
             padding: 6px 14px;
             border-radius: var(--border-radius-full);
             font-size: 0.82rem;
-            color: var(--text-muted);
+            color: var(--text-subtle);
             cursor: pointer;
             user-select: none;
-            transition: var(--transition);
+            transition: var(--transition-base);
+        }
+        .tag-pill:hover {
+            border-color: #cbd5e1;
+            background: #e2e8f0;
+        }
+        .tag-pill:active {
+            transform: translateY(1px);
         }
         .tag-pill.selected {
             background: var(--color-status-available-bg);
@@ -67,23 +84,23 @@
                 <div class="user-avatar"><%= currentUser.getName().substring(0, 1).toUpperCase() %></div>
                 <span><%= currentUser.getName() %></span>
             </div>
-            <a href="<%= request.getContextPath() %>/login?action=logout" class="btn btn-secondary btn-sm">Sign Out</a>
+            <a href="<%= request.getContextPath() %>/login?action=logout&role=driver" class="btn btn-secondary btn-sm">Sign Out</a>
         </div>
     </nav>
 
     <!-- Main Container -->
-    <main class="container" style="max-width: 600px;">
-        <div class="card" style="padding: 36px 32px;">
-            <div style="margin-bottom: 24px; text-align: center;">
-                <div style="font-size: 2.5rem; margin-bottom: 8px;">🌟</div>
-                <h2 style="font-size: 1.6rem; font-weight: 800; color: var(--color-primary);">How Was Your Parking Experience?</h2>
-                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px;">
-                    Reservation #<%= booking.getBookingId() %> &bull; Bay <%= booking.getSlotId() %> (<%= booking.getVehicleNumber() %>)
+    <main class="container" style="max-width: 560px;">
+        <div class="card" style="padding: 32px 28px;">
+            <div style="margin-bottom: 20px; text-align: center;">
+                <h2 style="font-size: 1.45rem; font-weight: 700; color: var(--color-primary);">Parking Feedback</h2>
+                <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 4px;">
+                    Booking #<%= booking.getBookingId() %> &bull; Bay <%= booking.getSlotId() %> (<%= booking.getVehicleNumber() %>)
                 </p>
             </div>
 
             <form action="<%= request.getContextPath() %>/booking" method="POST">
                 <input type="hidden" name="action" value="submitFeedback">
+                <input type="hidden" name="csrfToken" value="<%= com.parkingsystem.util.CsrfUtil.getToken(request) %>">
                 <input type="hidden" name="bookingId" value="<%= booking.getBookingId() %>">
                 <input type="hidden" id="ratingInput" name="rating" value="5">
 
@@ -119,22 +136,29 @@
                               placeholder="Share your experience to help us improve urban parking operations..."></textarea>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block" style="font-size: 1rem; padding: 14px;">
-                    Submit Parking Review &rarr;
+                <button type="submit" class="btn btn-primary btn-block" style="font-size: 0.95rem; padding: 12px;">
+                    Submit Feedback &rarr;
                 </button>
             </form>
         </div>
     </main>
 
-    <!-- Footer -->
-    <footer class="footer">
+        <!-- Standardized Academic Footer -->
+    <footer class="footer" role="contentinfo">
         <div class="footer-container">
             <div>
-                <strong>Smart Parking Management System</strong>
-                <div style="font-size: 0.82rem; margin-top: 4px;">Dynamic Web Application powered by Java 17 & Apache Tomcat 9</div>
+                <div class="footer-brand">SmartParking</div>
+                <div class="footer-sub">Smart Parking Management System • Academic Mini Project</div>
+                <div class="footer-sub" style="margin-top: 4px;">Developed with Java 17, JSP, Servlets, JDBC & MySQL</div>
             </div>
-            <div class="footer-sdg">
-                <span>🌱</span> Real-Time Smart Urban Mobility
+            <div style="text-align: right;">
+                <div class="footer-links" style="margin-bottom: 6px; justify-content: flex-end;">
+                    <a href="<%= request.getContextPath() %>/privacy.jsp">Privacy Policy</a>
+                    <a href="<%= request.getContextPath() %>/terms.jsp">Terms &amp; Conditions</a>
+                    <a href="<%= request.getContextPath() %>/cookies.jsp">Cookie Policy</a>
+                    <a href="<%= request.getContextPath() %>/refund.jsp">Refund Policy</a>
+                </div>
+                <div class="footer-sub">&copy; 2026 SmartParking. For Academic Demonstration.</div>
             </div>
         </div>
     </footer>
@@ -177,5 +201,6 @@
             }
         }
     </script>
+    <script src="<%= request.getContextPath() %>/resources/js/cookieConsent.js"></script>
 </body>
 </html>

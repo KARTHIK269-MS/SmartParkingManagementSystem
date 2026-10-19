@@ -1,10 +1,16 @@
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+<%@ page import="com.parkingsystem.model.OccupancyPrediction" %>
 <%@ page import="com.parkingsystem.model.User" %>
 <%@ page import="com.parkingsystem.model.Zone" %>
 <%@ page import="java.util.List" %>
+<%@ page import="java.util.Map" %>
 <%
-    User currentUser = (User) session.getAttribute("user");
+    User currentUser = (User) session.getAttribute("driverUser");
+    if (currentUser == null) {
+        currentUser = (User) session.getAttribute("user");
+    }
     List<Zone> allZones = (List<Zone>) request.getAttribute("zones");
+    Map<String, OccupancyPrediction> predictions = (Map<String, OccupancyPrediction>) request.getAttribute("predictions");
     if (allZones == null) {
         response.sendRedirect(request.getContextPath() + "/zones");
         return;
@@ -31,7 +37,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parking Zones | Smart Parking Management System</title>
+    <meta name="description" content="Find live available parking zones and real-time bay availability across Bengaluru, Hyderabad, and Chennai.">
+    <title>SmartParking | Parking Zones &amp; Live Occupancy</title>
+    <link rel="icon" type="image/svg+xml" href="<%= request.getContextPath() %>/resources/images/favicon.svg">
     <link rel="stylesheet" href="<%= request.getContextPath() %>/resources/css/style.css">
 </head>
 <body>
@@ -74,7 +82,7 @@
                     <div class="user-avatar"><%= currentUser.getName().substring(0, 1).toUpperCase() %></div>
                     <span><%= currentUser.getName() %></span>
                 </div>
-                <a href="<%= request.getContextPath() %>/login?action=logout" class="btn btn-secondary btn-sm">Sign Out</a>
+                <a href="<%= request.getContextPath() %>/login?action=logout&role=driver" class="btn btn-secondary btn-sm">Sign Out</a>
             <% } else { %>
                 <a href="<%= request.getContextPath() %>/login" class="btn btn-secondary btn-sm">Sign In</a>
                 <a href="<%= request.getContextPath() %>/register" class="btn btn-primary btn-sm">Register</a>
@@ -82,63 +90,26 @@
         </div>
     </nav>
 
-    <!-- Hero Section (Smart Parking UK Style) -->
-    <header class="hero hero-video-wrapper">
-        <!-- Background Video Animation -->
-        <div class="video-bg-container">
-            <video class="video-bg" autoplay muted loop playsinline poster="<%= request.getContextPath() %>/resources/images/hero_garage.jpg">
-                <source src="<%= request.getContextPath() %>/resources/videos/parking_background.mp4" type="video/mp4">
-            </video>
-            <div class="video-bg-overlay"></div>
-            <div class="video-ambient-glow"></div>
-        </div>
+    <!-- Page Header -->
+    <header class="hero">
         <div class="hero-container">
             <div class="hero-content">
-                <div class="hero-pill">
-                    <span class="pulse-dot"></span> Live Intelligent Bay Monitoring Active &bull; 📹 Facility Cam Online
-                </div>
-                <h1 class="hero-title">
-                    Smarter, Greener & <span>Stress-Free</span> Urban Parking
-                </h1>
+                <h1 class="hero-title">Parking Zones</h1>
                 <p class="hero-subtitle">
-                    Real-time geomagnetic sensor tracking, instant contactless bay reservation, and dynamic occupancy analytics across multi-storey parking facilities.
+                    Find an available parking bay and reserve it before you arrive.
                 </p>
-                <div style="margin-bottom: 20px; display: inline-flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(8px); padding: 8px 16px; border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.82rem; color: #f1f5f9; flex-wrap: wrap;">
-                    <span style="display: flex; align-items: center; gap: 5px;"><strong style="color: #60a5fa;">Dynamic Demand Pricing:</strong></span>
-                    <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(239, 68, 68, 0.25); color: #fca5a5; padding: 2px 8px; border-radius: 12px; font-weight: 700;">⚡ Rush Hours: ₹50/hr</span>
-                    <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59, 130, 246, 0.25); color: #93c5fd; padding: 2px 8px; border-radius: 12px; font-weight: 700;">⚖️ Normal: ₹40/hr</span>
-                    <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(16, 185, 129, 0.25); color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-weight: 700;">🏷️ No Rush: ₹30/hr</span>
-                </div>
                 <div class="hero-stats">
                     <div class="hero-stat-card">
-                        <div class="hero-stat-num count-up" data-target="<%= totalAvailable %>">0</div>
+                        <div class="hero-stat-num"><%= totalAvailable %></div>
                         <div class="hero-stat-label">Bays Available Now</div>
                     </div>
                     <div class="hero-stat-card">
-                        <div class="hero-stat-num count-up" data-target="<%= totalCapacity %>">0</div>
+                        <div class="hero-stat-num"><%= totalCapacity %></div>
                         <div class="hero-stat-label">Total Monitored Bays</div>
                     </div>
                     <div class="hero-stat-card">
-                        <div class="hero-stat-num count-up" data-target="<%= zones.size() %>">0</div>
+                        <div class="hero-stat-num"><%= zones.size() %></div>
                         <div class="hero-stat-label">Active Parking Zones</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Hero Visual: Multi-Storey Smart Garage Live Camera Video Feed -->
-            <div class="hero-visual">
-                <div class="hero-image-card" style="box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 30px rgba(0, 208, 132, 0.25); border: 2px solid rgba(0, 208, 132, 0.4);">
-                    <video class="hero-img" id="heroCamVideo" autoplay muted defaultMuted loop playsinline poster="<%= request.getContextPath() %>/resources/images/hero_garage.jpg" style="width: 100%; height: 100%; object-fit: cover; display: block;">
-                        <source src="<%= request.getContextPath() %>/resources/videos/parking_background.mp4" type="video/mp4">
-                    </video>
-                    <div class="hero-image-overlay">
-                        <div class="hero-live-badge" style="background: rgba(0, 208, 132, 0.95); color: #0b192c; font-weight: 700;">
-                            <span class="pulse-dot" style="background: #0b192c;"></span> LIVE FACILITY CAM &bull; 60 FPS
-                        </div>
-                        <div class="hero-image-caption">
-                            <strong>Multi-Storey Facility Live Feed</strong>
-                            <span>Real-Time Overhead Ultrasonic Sensor Matrix &bull; Levels 1–3 Monitored</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -150,7 +121,7 @@
         <% if ("welcome".equals(msg)) { %>
             <div class="alert alert-success">
                 <span>✓</span>
-                <div>Welcome to Smart Parking! Select your preferred parking zone below to reserve your bay.</div>
+                <div>Welcome to Smart Parking! Select your preferred parking facility below to reserve your bay.</div>
             </div>
         <% } else if ("session_expired".equals(msg)) { %>
             <div class="alert alert-danger">
@@ -166,16 +137,16 @@
 
         <div class="section-header">
             <div>
-                <h2 class="section-title">Select City & Parking Facility</h2>
-                <p class="section-subtitle">Real-time smart parking across India's premier commercial hubs and tech corridors</p>
+                <h2 class="section-title">Select Parking Facility</h2>
+                <p class="section-subtitle">Real-time parking availability across major city commercial centres</p>
             </div>
         </div>
 
         <!-- City Quick Filter Navigation -->
         <div class="city-filter-container">
-            <button type="button" class="city-filter-btn active" data-city="BENGALURU">💻 Bengaluru</button>
-            <button type="button" class="city-filter-btn" data-city="HYDERABAD">💎 Hyderabad</button>
-            <button type="button" class="city-filter-btn" data-city="CHENNAI">🚗 Chennai</button>
+            <button type="button" class="city-filter-btn active" data-city="BENGALURU">Bengaluru</button>
+            <button type="button" class="city-filter-btn" data-city="HYDERABAD">Hyderabad</button>
+            <button type="button" class="city-filter-btn" data-city="CHENNAI">Chennai</button>
         </div>
 
         <!-- Zones Grid -->
@@ -184,68 +155,32 @@
                 int occ = z.getOccupancyPercentage();
                 String occClass = occ > 75 ? "high" : "";
 
-                // Determine Indian City Tag
+                // Determine City Tag
                 String cityKey = "OTHER";
                 String cityName = "India";
-                String cityIcon = "📍";
                 String text = (z.getName() + " " + z.getLocation()).toLowerCase();
-                if (text.contains("bengaluru") || text.contains("bangalore")) { cityKey = "BENGALURU"; cityName = "Bengaluru"; cityIcon = "💻"; }
-                else if (text.contains("hyderabad")) { cityKey = "HYDERABAD"; cityName = "Hyderabad"; cityIcon = "💎"; }
-                else if (text.contains("chennai")) { cityKey = "CHENNAI"; cityName = "Chennai"; cityIcon = "🚗"; }
+                if (text.contains("bengaluru") || text.contains("bangalore")) { cityKey = "BENGALURU"; cityName = "Bengaluru"; }
+                else if (text.contains("hyderabad")) { cityKey = "HYDERABAD"; cityName = "Hyderabad"; }
+                else if (text.contains("chennai")) { cityKey = "CHENNAI"; cityName = "Chennai"; }
 
-                // 1-to-1 Dedicated Unique Landmark Facility Photo for Every Zone (Zero Repetition)
                 String zoneKey = z.getZoneId().toLowerCase().replace("-", "_");
                 String cardImg = request.getContextPath() + "/resources/images/zone_" + zoneKey + ".jpg";
-                String tierClass = z.isRushHour() ? "surge-active rush-hour" : (z.isOffPeak() ? "no-rush-active" : "normal-hours");
             %>
-                <div class="zone-card <%= tierClass %>" data-city="<%= cityKey %>" style="<%= "BENGALURU".equals(cityKey) ? "display: flex;" : "display: none;" %>">
-                    <!-- Facility Header Photo (Unique per zone, no repetition) -->
+                <div class="zone-card" data-city="<%= cityKey %>" style="<%= "BENGALURU".equals(cityKey) ? "display: flex;" : "display: none;" %>">
+                    <!-- Facility Header Photo -->
                     <div class="zone-card-thumb-wrap">
                         <img src="<%= cardImg %>" alt="<%= z.getName() %>" class="zone-card-thumb" loading="lazy" onerror="this.src='<%= request.getContextPath() %>/resources/images/hero_garage.jpg'">
                         <div class="zone-thumb-overlay">
-                            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                                <span class="zone-tag">ZONE <%= z.getZoneId() %></span>
-                                <span class="city-tag-pill"><%= cityIcon %> <%= cityName %></span>
-                            </div>
-                            <% if (z.isRushHour()) { %>
-                                <span class="badge" style="background: #ef4444; color: #ffffff; font-weight: 800; font-size: 0.68rem; padding: 3px 8px; border-radius: 12px; box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);">
-                                    ⚡ RUSH HOUR (₹50)
-                                </span>
-                            <% } else if (z.isOffPeak()) { %>
-                                <span class="badge" style="background: #10b981; color: #ffffff; font-weight: 800; font-size: 0.68rem; padding: 3px 8px; border-radius: 12px; box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);">
-                                    🏷️ NO RUSH (₹30)
-                                </span>
-                            <% } else { %>
-                                <span class="badge" style="background: #3b82f6; color: #ffffff; font-weight: 800; font-size: 0.68rem; padding: 3px 8px; border-radius: 12px; box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);">
-                                    ⚖️ NORMAL (₹40)
-                                </span>
-                            <% } %>
+                            <span class="zone-tag">ZONE <%= z.getZoneId() %></span>
+                            <span class="city-tag-pill"><%= cityName %></span>
                         </div>
                     </div>
 
                     <div class="zone-card-top">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 6px;">
-                            <h3 class="zone-name" style="margin-bottom: 0; font-size: 1.12rem; line-height: 1.3;"><%= z.getName() %></h3>
-                            <div class="zone-rate" style="text-align: right; flex-shrink: 0;">
-                                <% if (z.isRushHour()) { %>
-                                    <div style="text-decoration: line-through; color: var(--text-muted); font-size: 0.75rem; line-height: 1;">
-                                        ₹ 40
-                                    </div>
-                                    <div style="color: #dc2626; font-weight: 800; font-size: 1.22rem; line-height: 1.1;">
-                                        ₹ 50<span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 500;">/hr</span>
-                                    </div>
-                                <% } else if (z.isOffPeak()) { %>
-                                    <div style="text-decoration: line-through; color: var(--text-muted); font-size: 0.75rem; line-height: 1;">
-                                        ₹ 40
-                                    </div>
-                                    <div style="color: #059669; font-weight: 800; font-size: 1.22rem; line-height: 1.1;">
-                                        ₹ 30<span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 500;">/hr</span>
-                                    </div>
-                                <% } else { %>
-                                    <div style="font-size: 1.22rem; font-weight: 800; color: var(--color-primary);">
-                                        ₹ 40<span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 500;">/hr</span>
-                                    </div>
-                                <% } %>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 4px;">
+                            <h3 class="zone-name"><%= z.getName() %></h3>
+                            <div class="zone-rate" style="text-align: right; flex-shrink: 0; font-size: 1.15rem; font-weight: 700; color: var(--color-primary);">
+                                ₹ <%= (int) z.getEffectiveHourlyRate() %><span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/hr</span>
                             </div>
                         </div>
                         <div class="zone-location">
@@ -256,46 +191,40 @@
                     <div class="zone-card-body">
                         <p class="zone-desc"><%= z.getDescription() %></p>
 
-                        <% if (z.isRushHour()) { %>
-                            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--border-radius-sm); padding: 6px 10px; font-size: 0.78rem; color: #991b1b; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-                                <span>⚡</span> <strong>Rush Hour Active:</strong> High demand (occupancy ≥75%) &bull; Peak tariff at <strong>₹50/hr</strong>.
-                            </div>
-                        <% } else if (z.isOffPeak()) { %>
-                            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--border-radius-sm); padding: 6px 10px; font-size: 0.78rem; color: #166534; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-                                <span>🏷️</span> <strong>No Rush Hours:</strong> Low demand (<40% occupancy) &bull; Saver tariff at <strong>₹30/hr</strong>.
-                            </div>
-                        <% } else { %>
-                            <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--border-radius-sm); padding: 6px 10px; font-size: 0.78rem; color: #1e40af; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-                                <span>⚖️</span> <strong>Normal Hours:</strong> Moderate demand (40%–74%) &bull; Standard tariff at <strong>₹40/hr</strong>.
-                            </div>
-                        <% } %>
-
                         <div class="occupancy-box">
                             <div class="occupancy-labels">
-                                <span style="display: flex; align-items: center; gap: 6px;">
-                                    <span class="pulse-dot"></span> <%= z.getAvailableSlots() %> Bays Available
-                                </span>
+                                <span><%= z.getAvailableSlots() %> Bays Available</span>
                                 <span style="color: var(--text-muted);"><%= occ %>% Occupied</span>
                             </div>
                             <div class="occupancy-progress-bar">
                                 <div class="occupancy-fill <%= occClass %>" style="width: <%= occ %>%;"></div>
                             </div>
-                            <!-- 10-Dot Miniature Availability Distribution -->
-                            <div class="dot-matrix-preview" title="Live Bay Distribution: Green = Free, Gray = Occupied">
-                                <% 
-                                   int totalDots = 10;
-                                   int occDots = (int) Math.round((occ / 100.0) * totalDots);
-                                   for (int d = 0; d < totalDots; d++) {
-                                       boolean isOcc = d < occDots;
-                                %>
-                                    <span class="matrix-dot <%= isOcc ? "occupied" : "free" %>"></span>
+                        </div>
+
+                        <%
+                            OccupancyPrediction pred = (predictions != null) ? predictions.get(z.getZoneId()) : null;
+                        %>
+                        <% if (pred != null) { %>
+                            <div class="prediction-chip" style="margin-top: 10px; margin-bottom: 12px; font-size: 0.8rem; padding: 6px 10px; border-radius: 6px; background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.15); display: flex; align-items: center; justify-content: space-between;">
+                                <span style="font-weight: 600; color: #1e3a8a; display: flex; align-items: center; gap: 5px;">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    AI Forecast:
+                                </span>
+                                <% if (pred.isSufficientData()) { %>
+                                    <span style="color: #1e40af; font-weight: 600;" title="Expected in 1 hour based on empirical trends">
+                                        +1h: <%= pred.getPredicted1hAvailable() %> free (<%= Math.round(pred.getPredicted1hPercent()) %>%)
+                                    </span>
+                                <% } else { %>
+                                    <span style="color: #64748b; font-style: italic; font-size: 0.76rem;" title="Historical observations accumulating">
+                                        Data collecting (<%= pred.getObservationsCount() %>/3)
+                                    </span>
                                 <% } %>
                             </div>
-                        </div>
+                        <% } %>
 
                         <a href="<%= request.getContextPath() %>/zones?action=slots&zone=<%= z.getZoneId() %>" 
                            class="btn btn-primary btn-block">
-                            Select Zone <%= z.getZoneId() %> Bays &rarr;
+                            Select Bay &rarr;
                         </a>
                     </div>
                 </div>
@@ -303,23 +232,29 @@
         </div>
     </main>
 
-    <!-- Footer -->
-    <footer class="footer">
+    <!-- Standardized Academic Footer -->
+    <footer class="footer" role="contentinfo">
         <div class="footer-container">
             <div>
-                <strong>Smart Parking Management System</strong>
-                <div style="font-size: 0.82rem; margin-top: 4px;">Dynamic Web Application powered by Java 17 & Apache Tomcat 9</div>
+                <div class="footer-brand">SmartParking</div>
+                <div class="footer-sub">Smart Parking Management System • Academic Mini Project</div>
+                <div class="footer-sub" style="margin-top: 4px;">Developed with Java 17, JSP, Servlets, JDBC & MySQL</div>
             </div>
-            <div class="footer-sdg">
-                <span>🌱</span> Real-Time Smart Urban Mobility
+            <div style="text-align: right;">
+                <div class="footer-links" style="margin-bottom: 6px; justify-content: flex-end;">
+                    <a href="<%= request.getContextPath() %>/privacy.jsp">Privacy Policy</a>
+                    <a href="<%= request.getContextPath() %>/terms.jsp">Terms &amp; Conditions</a>
+                    <a href="<%= request.getContextPath() %>/cookies.jsp">Cookie Policy</a>
+                    <a href="<%= request.getContextPath() %>/refund.jsp">Refund Policy</a>
+                </div>
+                <div class="footer-sub">&copy; 2026 SmartParking. For Academic Demonstration.</div>
             </div>
         </div>
     </footer>
 
-    <!-- Vanilla JavaScript for Interactive City Filtering & Number Count-Up Animations -->
+    <!-- Vanilla JavaScript for City Filtering -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // 1. City Quick Filtering
             const filterBtns = document.querySelectorAll('.city-filter-btn');
             const zoneCards = document.querySelectorAll('.zone-card');
 
@@ -337,27 +272,6 @@
                         }
                     });
                 });
-            });
-
-            // 2. Smooth Number Count-Up for Hero Stats
-            const counters = document.querySelectorAll('.count-up');
-            counters.forEach(counter => {
-                const target = parseInt(counter.getAttribute('data-target') || '0', 10);
-                const duration = 1200; // 1.2 seconds
-                const stepTime = 20;
-                const steps = duration / stepTime;
-                const increment = target / steps;
-                let current = 0;
-
-                const timer = setInterval(() => {
-                    current += increment;
-                    if (current >= target) {
-                        counter.textContent = target.toLocaleString();
-                        clearInterval(timer);
-                    } else {
-                        counter.textContent = Math.floor(current).toLocaleString();
-                    }
-                }, stepTime);
             });
         });
 
@@ -437,22 +351,6 @@
         }
         <% } %>
     </script>
-    <script>
-        // Ensure background & preview videos autoplay smoothly and loop
-        document.addEventListener('DOMContentLoaded', function() {
-            var vids = document.querySelectorAll('video');
-            vids.forEach(function(v) {
-                v.muted = true;
-                var playPromise = v.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(function(err) {
-                        console.warn("Autoplay deferred, retrying muted:", err);
-                        v.muted = true;
-                        v.play();
-                    });
-                }
-            });
-        });
-    </script>
+    <script src="<%= request.getContextPath() %>/resources/js/cookieConsent.js"></script>
 </body>
 </html>

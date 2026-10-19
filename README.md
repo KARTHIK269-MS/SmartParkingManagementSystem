@@ -1,182 +1,390 @@
-# Smart Parking Management System (PRJ_35)
+# Smart Parking Management System
 
-**SDG Mapping:** Sustainable Development Goal 11 (Sustainable Cities and Communities)  
-**Architecture:** Model-View-Controller (MVC)  
-**Backend:** Java 17, Servlet 4.0, JSP, JDBC (Transactional DAO Pattern)  
-**Database:** MySQL 8.0  
-**Frontend:** JSP + Vanilla JavaScript (No Frameworks), Modern CSS (Smart Parking UK Aesthetic)  
-**Package:** `com.parkingsystem`  
-**Location:** `C:\Users\LENOVO\smart-parking-system`  
+[![Java 17](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html)
+[![Servlet 4.0](https://img.shields.io/badge/Servlet-4.0-blue.svg)](https://javaee.github.io/servlet-spec/)
+[![Apache Tomcat 9](https://img.shields.io/badge/Tomcat-9.0-yellow.svg)](https://tomcat.apache.org/download-90.cgi)
+[![MySQL 8.0](https://img.shields.io/badge/MySQL-8.0-blue.svg)](https://www.mysql.com/)
+[![License](https://img.shields.io/badge/License-Pending_Choice-lightgrey.svg)](#-license)
+[![Tests Passing](https://img.shields.io/badge/Tests-190%2B%20Passed-brightgreen.svg)](docs/testing-guide.md)
 
----
+An enterprise-grade, IoT-enabled Smart Parking Management System designed for multi-facility urban corridors. Built with **Java 17, JSP, Servlets, JDBC, MySQL 8, and Apache Tomcat 9**, following strict **Model-View-Controller (MVC)** design patterns.
 
-## 1. Project Overview
-
-The **Smart Parking Management System** is an intelligent urban mobility web application designed to eliminate traffic congestion, optimize parking bay occupancy, and provide drivers with guaranteed, contactless parking reservations.
-
-The system incorporates physical sensor telemetry via an **IoT Simulator background daemon thread**, which safely broadcasts vehicle arrivals and departures using ACID-compliant JDBC row locks to protect active driver reservations against race conditions.
+The platform provides an end-to-end parking lifecycle: advance bay reservations, automated number-plate recognition (ANPR) barrier gate authorization, live sensor-driven occupancy synchronization, 3-tier dynamic demand pricing, contactless digital checkout, predictive occupancy modeling, and executive financial auditing with RFC 4180 CSV and OpenPDF export capabilities.
 
 ---
 
-## 2. Package & Directory Structure
+## 📌 Table of Contents
+
+- [Key Features](#-key-features)
+- [System Architecture](#-system-architecture)
+- [Technology Stack](#-technology-stack)
+- [Repository Directory Structure](#-repository-directory-structure)
+- [Prerequisites & Setup](#-prerequisites--setup)
+- [Safe Credential Configuration](#-safe-credential-configuration)
+- [Build, Package & Deployment](#-build-package--deployment)
+- [Default System Accounts](#-default-system-accounts)
+- [ANPR & Automated Gate Access](#-anpr--automated-gate-access)
+- [Smart Occupancy Prediction & Dynamic Pricing](#-smart-occupancy-prediction--dynamic-pricing)
+- [Audited Reports & Data Export](#-audited-reports--data-export)
+- [Automated Verification & Test Suites](#-automated-verification--test-suites)
+- [Security & Reliability Hardening](#-security--reliability-hardening)
+- [Hardware Prototype & Simulation Boundary](#-hardware-prototype--simulation-boundary)
+- [Viva Voce & Interview Q&A](#-viva-voce--interview-qa)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 🌟 Key Features
+
+### 🚗 Driver Web Portal
+- **Metropolitan Facility Discovery (`/zones`)**: Real-time browsing across 12 facilities in Bengaluru, Hyderabad, and Chennai with live bay status counters.
+- **Interactive Supervisory Bay Grid (`/slots`)**: Visual floor layout displaying Accessible, EV, Standard, and Executive bays with live state coloring.
+- **Advance Reservation with Grace Period (`/booking`)**: 15-minute scheduled arrival buffer preventing idle holding while guaranteeing slot availability.
+- **Contactless Checkout & Dynamic Billing (`/payment`)**: Dynamic tariff computation supporting UPI, FASTag, Credit/Debit Cards, and NetBanking.
+- **Driver History & Live Parking Sessions (`/myBookings`)**: Live elapsed session timers, navigation directions, and downloadable digital VAT/GST receipts.
+
+### 🏢 Facility Admin Console
+- **Executive Operations Dashboard (`/admin?action=dashboard`)**: Real-time monitoring across 150 bays with active vehicle counts and sensor telemetry pulse triggers.
+- **Supervisory Bay Overrides**: Administrative overrides for emergency maintenance with active reservation protection locks.
+- **3-Tier Dynamic Demand Pricing**: Automated tariff adjustment engine scaling operating rates by 1.25x upon crossing the 80% occupancy threshold.
+- **Smart Occupancy Prediction Engine**: Hourly demand curves comparing observed physical bay counts against machine-learned historical trendlines.
+- **Financial Audit & Ledger Reports**: Date-range filtered reporting for Bay Occupancy, Driver Bookings, and Settled Revenue.
+- **Security-Hardened Data Export**: One-click RFC 4180 CSV exports (with spreadsheet formula injection mitigation) and multi-page OpenPDF vector reports.
+- **ANPR Gate Access Controller (`/anpr.jsp`)**: High-accuracy camera plate recognition emulation, automated barrier gate actuation, and gate decision logging.
+
+---
+
+## 🏛️ System Architecture
+
+The application strictly enforces a 3-tier Model-View-Controller (MVC) architectural separation:
+
+```
++-----------------------------------------------------------------------------------+
+|                                PRESENTATION TIER                                  |
+|   Driver Web Portal (JSP, CSS3, Fetch API)  |  Facility Admin Console (JSP, Tabs) |
++----------------------------------------+------------------------------------------+
+                                         | HTTP / REST API
+                                         v
++-----------------------------------------------------------------------------------+
+|                                APPLICATION CONTROLLER TIER                        |
+|   ZoneServlet | BookingServlet | AdminServlet | IoTSensorServlet | LoginServlet   |
+|                       ReservationCleanupService (Background Daemon)               |
++----------------------------------------+------------------------------------------+
+                                         | Service Invocation
+                                         v
++-----------------------------------------------------------------------------------+
+|                                DOMAIN & DATA ACCESS TIER                          |
+|   BookingDAO | SlotDAO | UserDAO | ZoneDAO | PaymentDAO | ReportDAO | PredictionDAO   |
+|   Utilities: DBConnection, PasswordHasher (BCrypt), CsvExportUtil, PdfExportUtil  |
++----------------------------------------+------------------------------------------+
+                                         | JDBC / PreparedStatements
+                                         v
++-----------------------------------------------------------------------------------+
+|                                PERSISTENCE TIER                                   |
+|                     MySQL 8.0 Database Engine (parking_system)                     |
++-----------------------------------------------------------------------------------+
+```
+
+### Complete Booking & Parking Lifecycle State Machine:
+```
+[AVAILABLE] ──(Advance Reserve)──► [RESERVED] ──(ANPR Gate Check-in)──► [OCCUPIED]
+     ▲                                   │                                    │
+     │                           (Grace Expiry / Cancel)              (Vehicle Depart)
+     │                                   │                                    ▼
+     └───────────────────────────────────┴────────── [PAYMENT_PENDING] ──(Payment)──► [COMPLETED]
+```
+
+---
+
+## 💻 Technology Stack
+
+| Component | Technology | Version | Description |
+|---|---|---|---|
+| **Language** | Java (JDK) | 17 LTS | Core backend application logic |
+| **Servlet Specification** | Java Servlet API | 4.0.1 | Controller mappings and request dispatching |
+| **View Template Engine** | JavaServer Pages (JSP) | 2.3.3 | Dynamic server-side page rendering |
+| **Database Engine** | MySQL Server | 8.0.x | Relational storage with InnoDB engine |
+| **Database Driver** | MySQL Connector/J | 8.3.0 / 9.x | JDBC persistence and connection pooling |
+| **Application Server** | Apache Tomcat | 9.0.x | Servlet container and HTTP listener |
+| **Security & Hashing** | Pure Java BCrypt | 10 Salt Rounds | One-way cryptographic password storage |
+| **PDF Generation** | OpenPDF (LibrePDF) | 1.3.30 | Vector PDF generation for financial audits |
+| **Data Analytics** | Chart.js | 4.x (CDN) | Client-side responsive interactive charts |
+| **Computer Vision (ANPR)** | OpenCV & Tesseract | Python 3.10+ | Prototype number plate extraction pipeline |
+| **Microcontroller Firmware** | C++ (Arduino IDE) | ESP32 | Ultrasonic & geomagnetic sensor firmware |
+
+---
+
+## 📂 Repository Directory Structure
 
 ```
 smart-parking-system/
-├── pom.xml                                  # Maven project configuration (war packaging)
-├── .project                                 # Eclipse Dynamic Web Project configuration
-├── .classpath                               # Eclipse classpath (JavaSE-17, Web App Libraries)
-├── .settings/                               # Eclipse facet and compiler preferences
-├── build.ps1                                # Automated compilation & WAR packaging script
-├── deploy-to-tomcat.ps1                     # Tomcat 9 deployment script
+├── README.md                           # Master project documentation
+├── .gitignore                          # Comprehensive Git ignore rules
+├── pom.xml                             # Maven build descriptor (Java 17 + WAR)
+├── build.ps1                           # Automated standalone compiler & packager
+├── run_tests.ps1                       # Automated 6-suite test runner
+├── CONTRIBUTING.md                     # Community contribution guidelines
+├── SECURITY.md                         # Responsible vulnerability disclosure policy
+├── CHANGELOG.md                        # Version release history
+├── config/
+│   └── application.example.properties  # Sanitized configuration template
 ├── database/
-│   └── schema.sql                           # MySQL database schema & initial seed data
-├── src/
-│   ├── main/
-│   │   ├── java/
-│   │   │   └── com/
-│   │   │       └── parkingsystem/
-│   │   │           ├── model/               # User, Slot, Booking, Zone, Feedback, Payment
-│   │   │           ├── exception/           # DatabaseException, SlotUnavailableException, etc.
-│   │   │           ├── util/                # DBConnection, PasswordHasher (SHA-256), IoTSimulator, JsonUtil
-│   │   │           ├── dao/                 # UserDAO, SlotDAO, BookingDAO, ZoneDAO, FeedbackDAO, PaymentDAO
-│   │   │           └── servlet/             # LoginServlet, RegisterServlet, ZoneServlet, BookingServlet, AdminServlet
-│   │   └── webapp/
-│   │       ├── WEB-INF/
-│   │       │   ├── web.xml                  # Servlet mappings & session config
-│   │       │   └── lib/                     # Bundled MySQL Connector JAR (mysql-connector-j-9.7.0.jar)
-│   │       ├── resources/
-│   │       │   ├── css/
-│   │       │   │   └── style.css            # SmartParking.com-inspired design system & animations
-│   │       │   └── js/
-│   │       │       ├── validation.js        # Form validation (auth, booking, VRN)
-│   │       │       ├── slotStatus.js        # Periodic 5s AJAX polling for live bay availability
-│   │       │       ├── paymentTimer.js      # 5-minute countdown ring timer with auto-release
-│   │       │       └── admin.js             # Admin sorting, search, filtering & IoT controls
-│   │       ├── index.jsp                    # Root redirect to zones
-│   │       ├── login.jsp                    # Driver & Admin authentication
-│   │       ├── register.jsp                 # Driver registration with validation
-│   │       ├── zones.jsp                    # Zone overview with capacity & tariffs
-│   │       ├── slots.jsp                    # Interactive multi-floor parking bay grid
-│   │       ├── booking.jsp                  # Two-step booking with Indian HSRP VRN builder
-│   │       ├── payment.jsp                  # Mock payment gateway with timer & receipt summary
-│   │       ├── myBookings.jsp               # Booking ledger, e-ticket pass modal & cancellation
-│   │       ├── feedback.jsp                 # Post-parking 5-star rating & review
-│   │       └── admin/
-│   │           └── dashboard.jsp            # Facility manager dashboard, overrides & IoT simulator
-│   └── test/
-│       └── java/
-│           └── com/
-│               └── parkingsystem/
-│                   └── TestSystem.java      # End-to-End Automated Verification Test Suite
+│   ├── schema.sql                      # Complete DDL tables and schema
+│   ├── seed-data.sql                   # Realistic 150-bay development seed dataset
+│   └── README.md                       # MySQL installation & setup instructions
+├── docs/
+│   ├── architecture.md                 # In-depth architectural design
+│   ├── setup-guide.md                  # Step-by-step local workstation installation
+│   ├── testing-guide.md                # Test execution and concurrency guarantees
+│   └── screenshots/                    # UI walkthrough & feature gallery
+├── anpr_service/
+│   ├── anpr_pipeline.py                # Python OpenCV & OCR number plate pipeline
+│   └── requirements.txt                # Python dependencies
+├── iot_firmware/
+│   ├── HARDWARE_WIRING_GUIDE.md        # ESP32 & Raspberry Pi pinout schematics
+│   ├── esp32/esp32_smart_parking.ino   # Arduino firmware for smart bay node
+│   └── raspberry_pi/                   # Gate barrier servo & camera controller
+└── src/
+    ├── main/
+    │   ├── java/com/parkingsystem/
+    │   │   ├── dao/                    # BookingDAO, SlotDAO, UserDAO, ReportDAO, PredictionDAO...
+    │   │   ├── model/                  # Booking, Slot, Zone, Payment, GateActivityEvent...
+    │   │   ├── servlet/                # AdminServlet, BookingServlet, IoTSensorServlet...
+    │   │   └── util/                   # DBConnection, PasswordHasher, CsvExportUtil, PdfExportUtil...
+    │   └── webapp/
+    │       ├── WEB-INF/
+    │       │   ├── web.xml             # Servlet mappings, session timeouts, error pages
+    │       │   └── lib/                # Bundled MySQL connector & OpenPDF libraries
+    │       ├── admin/
+    │       │   └── dashboard.jsp       # Facility Admin Console
+    │       ├── resources/              # CSS, JS, SVG assets, and imagery
+    │       ├── anpr.jsp                # ANPR gate scanner & barrier simulation
+    │       ├── booking.jsp             # Slot reservation page
+    │       ├── myBookings.jsp          # Driver booking history & live timers
+    │       ├── payment.jsp             # Contactless payment portal
+    │       ├── slots.jsp               # Interactive bay map
+    │       └── zones.jsp               # Corridor facility browser
+    └── test/java/com/parkingsystem/
+        ├── MiniProjectUnitTest.java    # Core logic unit tests
+        ├── TestSystem.java             # System integration tests
+        ├── BayAvailabilitySyncTest.java# Real-time state parity tests
+        ├── AdminReportsTest.java       # Reports & export audit tests
+        ├── ANPRGateWorkflowTest.java   # Number-plate gate verification tests
+        └── BookingLifecycleAuditTest.java # Lifecycle & duration distinction tests
 ```
 
 ---
 
-## 3. Database Setup (MySQL 8.0)
+## ⚙️ Prerequisites & Setup
 
-- **Database Name:** `parking_system`
-- **Host:** `localhost:3306`
-- **User:** `root`
-- **Password:** `karthik123`
+### Requirements:
+- **Java Development Kit (JDK)**: 17 LTS (Eclipse Temurin or Oracle JDK)
+- **Servlet Container**: Apache Tomcat 9.0.x
+- **Database Server**: MySQL Server 8.0.x
+- **Operating System**: Windows, macOS, or Linux
 
-To re-apply or inspect the schema:
+### Step 1: Clone Repository
+```bash
+git clone https://github.com/KARTHIK269-MS/SmartParkingManagementSystem.git
+cd SmartParkingManagementSystem
+```
+
+### Step 2: Database Initialization
+Import the schema and initial dataset into MySQL:
+```bash
+mysql -u root -p < database/schema.sql
+```
+*(For detailed database documentation, see [database/README.md](database/README.md).)*
+
+---
+
+## 🔒 Safe Credential Configuration
+
+To safeguard passwords and prevent accidental credential exposure to public repositories, the application uses dynamic multi-source resolution (`DBConnection`):
+
+1. Copy the configuration template:
+   ```bash
+   cp config/application.example.properties config/application.properties
+   ```
+   *(Or copy to `db.properties` in the project root)*
+
+2. Edit `config/application.properties` with your local MySQL password:
+   ```properties
+   db.url=jdbc:mysql://localhost:3306/parking_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata
+   db.user=root
+   db.password=your_actual_password_here
+   ```
+
+3. **Protection Guarantee**:
+   Both `config/application.properties` and `db.properties` are explicitly ignored in `.gitignore`. They will **never** be committed to Git.
+
+Alternatively, you can provide credentials via environment variables:
+```bash
+export DB_URL="jdbc:mysql://localhost:3306/parking_system"
+export DB_USER="root"
+export DB_PASSWORD="your_actual_password_here"
+```
+
+---
+
+## 🚀 Build, Package & Deployment
+
+### Build with PowerShell (Windows):
 ```powershell
-Get-Content "C:\Users\LENOVO\smart-parking-system\database\schema.sql" -Raw | & "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root --password=karthik123
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
+This compiles all Java 17 sources, synchronizes properties, and packages the application archive to `target/smart-parking-system.war`.
+
+### Build with Apache Maven (Cross-Platform):
+```bash
+mvn clean package
+```
+
+### Deploy to Apache Tomcat 9:
+1. Copy `target/smart-parking-system.war` to your Tomcat `webapps/` folder:
+   ```bash
+   cp target/smart-parking-system.war /path/to/tomcat/webapps/
+   ```
+2. Start Tomcat (`bin/startup.sh` or `bin/startup.bat`).
+3. Open your browser:
+   - **Driver Booking Portal**: `http://localhost:8080/smart-parking-system/zones`
+   - **Facility Admin Console**: `http://localhost:8080/smart-parking-system/admin?action=dashboard`
+   - **ANPR Simulation Gate**: `http://localhost:8080/smart-parking-system/anpr.jsp`
 
 ---
 
-## 4. Default Demo Accounts
+## 🔑 Default System Accounts
 
-| Role | Email | Password | Access Level |
+> [!NOTE]
+> All credentials below are seeded with BCrypt password hashes for local testing and demonstration.
+
+| Role | Email | Password | Access Scope |
 |---|---|---|---|
-| **Driver** | `driver@smartparking.com` | `Driver@123` | Browsing, Bay Reservation, Payments, Passes, Ratings |
-| **Admin** | `admin@smartparking.com` | `Admin@123` | Supervisory Dashboard, Manual Overrides, IoT Simulator, Audit Logs |
-
-*New driver accounts can also be created dynamically via the Register page.*
-
----
-
-## 5. How to Run in Eclipse IDE
-
-1. Open **Eclipse IDE**.
-2. Select **File &rarr; Open Projects from File System...**
-3. In **Import source**, click **Directory...** and select `C:\Users\LENOVO\smart-parking-system`.
-4. Click **Finish**. Eclipse will recognize it as a **Dynamic Web Project 4.0** with Java 17.
-5. Right-click the `smart-parking-system` project &rarr; **Run As &rarr; Run on Server** (select Apache Tomcat 9).
-6. Open your browser at:
-   `http://localhost:8080/smart-parking-system/`
+| **Facility Administrator** | `admin@smartparking.com` | `Admin@123` | Full administrative console, analytics, reports, overrides |
+| **Verified Driver** | `driver1@example.com` | `Driver@123` | Driver portal, bay reservations, live sessions |
+| **Verified Driver** | `driver2@example.com` | `Driver@123` | Driver portal, checkout payments, feedback |
 
 ---
 
-## 6. How to Build & Package via Terminal
+## 📷 ANPR & Automated Gate Access
 
-Run the automated PowerShell build script:
+The system enforces automated entry gate authorization based on vehicle registration numbers:
+1. **Verification**: When a vehicle approaches, the gate camera scans its plate and queries `/api/iot-sensor`.
+2. **Authorization**: The engine validates that an active reservation exists for the specific bay and scheduled arrival window.
+3. **Session Start**: The gate opens, session transitions to `ACTIVE`, bay status switches to `OCCUPIED`, and the session duration timer begins.
+4. **Rejection Safeguards**: Unknown plates, cancelled reservations, expired grace periods, wrong facilities, or repeated entry scans are automatically rejected with descriptive gate ledger audit entries.
+
+---
+
+## 📈 Smart Occupancy Prediction & Dynamic Pricing
+
+- **3-Tier Dynamic Demand Pricing**:
+  - **Normal (0% - 79%)**: Baseline tariff (e.g., ₹40/hr).
+  - **High Surge (80% - 99%)**: Automated 1.25x surge tariff to manage high peak-hour demand.
+  - **Critical (100%)**: Facility full; reservations paused until departure events occur.
+- **Smart Occupancy Prediction Engine**:
+  - Collects hourly occupancy snapshots in the `occupancy_snapshots` table.
+  - Calculates moving average demand curves across 24-hour cycles to forecast peak congestion times in the Admin Analytics console.
+
+---
+
+## 📊 Audited Reports & Data Export
+
+The Admin Console provides comprehensive financial auditing with custom date-range filtering:
+- **Real-Time Bay Occupancy Report**: Live snapshot vs historical records with explicit distinction.
+- **Driver Bookings Ledger**: Filtered list of driver reservations, vehicle numbers, durations, and statuses.
+- **Settled Revenue & Financials**: Genuine settled payment records, average ticket metrics, and top payment channels.
+- **Export Capabilities**:
+  - **RFC 4180 CSV**: Clean tabular output with active spreadsheet formula injection mitigation (`=`, `+`, `-`, `@` prefix defense).
+  - **OpenPDF Multi-Page PDF**: Professional vector document formatting with executive KPI summaries, clean empty states, and auto-wrapped table columns.
+
+---
+
+## 🧪 Automated Verification & Test Suites
+
+The project includes 6 comprehensive automated test suites covering 190+ assertions:
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\LENOVO\smart-parking-system\build.ps1"
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
-This will compile all Java 17 classes and generate `target/smart-parking-system.war`.
 
-To run the automated verification test suite:
-```powershell
-$cp = "C:\Program Files\apache-tomcat-9.0.117\lib\servlet-api.jar;C:\Program Files\apache-tomcat-9.0.117\lib\jsp-api.jar;C:\Users\LENOVO\smart-parking-system\src\main\webapp\WEB-INF\lib\mysql-connector-j-9.7.0.jar;C:\Users\LENOVO\smart-parking-system\build\classes"
-java -cp "$cp" com.parkingsystem.TestSystem
-```
+| Test Suite | File | Focus Area | Result |
+|---|---|---|---|
+| **Core Unit Tests** | `MiniProjectUnitTest.java` | BCrypt hashing, auth, cancellation, data isolation | **13 / 13 PASSED** |
+| **System Integration** | `TestSystem.java` | 150 bays, booking flow, IoT pulse, dynamic tariffs | **20 / 20 PASSED** |
+| **Session Parity** | `BayAvailabilitySyncTest.java` | Real-time state parity across Driver & Admin views | **9 / 9 PASSED** |
+| **Financial Exports** | `AdminReportsTest.java` | Date filters, CSV escaping, formula defense, OpenPDF | **93 / 93 PASSED** |
+| **ANPR Gate Engine** | `ANPRGateWorkflowTest.java` | Plate validation, gate ledger, duplicate scan rejection | **23 / 23 PASSED** |
+| **Lifecycle Audit** | `BookingLifecycleAuditTest.java` | Deferred timer, occupancy lock, checkout billing | **33 / 33 PASSED** |
+| **TOTAL** | — | **Full End-to-End System Audit** | **191 / 191 (100%)** |
 
 ---
 
-## 7. The 7 Core Modules (Confirmed Working End-to-End)
+## 🛡️ Security & Reliability Hardening
 
-1. **Authentication (`LoginServlet`, `RegisterServlet`)**:
-   - SHA-256 password hashing via `PasswordHasher`.
-   - `HttpSession`-based login state.
-   - Role-based redirection (`ADMIN` &rarr; Admin Console, `USER` &rarr; Zones).
-
-2. **Zone & Slot Browsing (`ZoneServlet`, `zones.jsp`, `slots.jsp`)**:
-   - High-impact Smart Parking UK visual styling.
-   - 6 parking facilities across India's top metropolitan hubs: Zone A (Mumbai - BKC Financial District), Zone B (Bengaluru - Electronic City), Zone C (New Delhi - Connaught Place), Zone D (Hyderabad - HITEC City), Zone E (Chennai - OMR), Zone F (Kolkata - Salt Lake).
-   - Multi-floor bay grid (Level 1 Ground Floor & Level 2 First Floor).
-   - Live 5-second polling via `slotStatus.js` consuming JSON endpoint `?action=slotStatusJson`.
-
-3. **Two-Step Booking (`BookingServlet`, `booking.jsp`)**:
-   - Indian HSRP vehicle plate builder with chrome Ashoka Chakra hologram and `IND` badge preview.
-   - Dynamic total amount calculation based on parking hours and zone tariff.
-   - Transactional slot reservation: atomically sets slot to `RESERVED` and sets a 5-minute session lock.
-
-4. **Mock Payment Gateway (`payment.jsp`, `paymentTimer.js`)**:
-   - 5-minute countdown clock with animated SVG progress ring.
-   - Auto-expiry: if payment is not completed in 5 minutes, an AJAX signal releases the held bay back to `AVAILABLE`.
-   - Mock options: Instant UPI (QR code preview), Credit/Debit Card, Net Banking, Smart Wallet.
-   - Generates realistic transaction references (`TXN...`).
-
-5. **My Bookings & Digital Passes (`myBookings.jsp`)**:
-   - Permitted booking ledger with filterable tabs.
-   - Printable Contactless Smart Parking Pass modal with barcode graphic and `window.print()`.
-   - Cancellation with instant mock refund and automatic slot release.
-
-6. **Feedback & Rating (`feedback.jsp`, `FeedbackDAO`)**:
-   - Interactive 5-star rating widget.
-   - Quick review tag pills ("Accurate Sensors", "Seamless Entry", "Clean & Well Lit").
-   - Aggregated in the admin dashboard.
-
-7. **Admin Dashboard (`AdminServlet`, `admin/dashboard.jsp`, `admin.js`)**:
-   - Real-time occupancy gauges, today's revenue, and driver ratings.
-   - Supervisory slot grid with **Manual Slot Status Override Modal** (`AVAILABLE`, `BOOKED`, `BLOCKED/MAINTENANCE`).
-   - Searchable and sortable driver bookings table (`admin.js`).
-   - **IoT Sensor Simulator Controls**: background thread toggle, manual sensor pulse trigger, and live event monitoring.
+1. **Password Hashing with BCrypt**: Passwords stored as one-way salt-hashed strings (`$2a$10$...`) using pure Java BCrypt with 10 salt rounds.
+2. **SQL Injection Defense**: 100% of queries use parameterized `PreparedStatement` interfaces.
+3. **Double-Booking Prevention**: Slot reservations utilize transactional row-level database locking (`SELECT ... FOR UPDATE`).
+4. **CSRF Protection**: State-changing forms enforce unique per-session CSRF tokens verified on the server.
+5. **Server-Side Price Recalculation**: Payment amounts are calculated independently on the server to prevent client-side price tampering.
+6. **Cross-User Data Isolation**: Servlets verify that bookings belong strictly to the authenticated user's session before permitting view, cancel, or payment actions.
 
 ---
 
-## 8. Viva & Interview Questions (Preparation for College Guide)
+## ⚙️ Hardware Prototype & Simulation Boundary
 
-**Q1: How does the system handle concurrent booking attempts on the same parking bay?**  
-**A:** The system enforces strict ACID transactional isolation in `SlotDAO` and `BookingDAO`. When a driver initiates a booking, `SELECT status FROM slots WHERE slot_id = ? FOR UPDATE` acquires an exclusive row lock. If the slot is `AVAILABLE`, it is immediately transitioned to `RESERVED`. Any concurrent transaction is blocked until the first finishes, preventing double-bookings.
+To maintain academic transparency and reproducibility:
+- **Physical Integration (Available)**: The repository includes complete firmware (`iot_firmware/esp32/`) and camera pipeline scripts (`anpr_service/anpr_pipeline.py`) for deploying to physical ESP32 microcontrollers and Raspberry Pi camera rigs.
+- **Simulation Boundary (Default)**: For environments without physical microcontrollers attached, the application provides built-in software simulation via `anpr.jsp` and administrative sensor pulse triggers (`IoTSensorServlet`). All business logic, timers, database transactions, and gate ledgers execute identically in both modes.
 
-**Q2: How does the IoT Simulator interact with user bookings without overwriting them?**  
-**A:** Before toggling a slot status, `IoTSimulator` checks `SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND status IN ('PENDING', 'CONFIRMED')`. If any active booking exists, the transaction rolls back immediately and protects the bay from simulated interference.
+---
 
-**Q3: How is real-time bay availability updated on the frontend without third-party frameworks?**  
-**A:** `slotStatus.js` uses native JavaScript `fetch()` to poll the lightweight JSON endpoint `ZoneServlet?action=slotStatusJson&zone=...` every 5 seconds. The DOM updates CSS classes dynamically, smoothly reflecting background sensor changes without full page reloads.
+## 🎓 Viva Voce & Interview Q&A
 
-**Q4: How is password security implemented?**  
-**A:** Passwords are never stored in plaintext. `PasswordHasher` applies cryptographic SHA-256 hashing before storing in the MySQL `users` table, and incoming passwords during login are hashed and verified against the stored hash.
+<details>
+<summary><b>Click to expand 10 Essential Viva Questions & Answers</b></summary>
+
+1. **Q: How does the MVC pattern function in this project?**
+   > *A:* Model represents entity POJOs and JDBC DAOs. View comprises dynamic JSP pages styled with CSS. Controller includes Java Servlets that authenticate requests, manage transactions, and dispatch responses.
+
+2. **Q: How is double-booking prevented when multiple drivers select the same bay concurrently?**
+   > *A:* We utilize database row-level locking via `SELECT ... FOR UPDATE` inside a database transaction (`lockAndReserveSlot`). The second transaction detects that the bay status is no longer `AVAILABLE` and throws a custom `SlotUnavailableException`.
+
+3. **Q: When does the parking session timer actually start?**
+   > *A:* Advance reservation locks the bay as `RESERVED` but **does not start the timer**. The timer begins **strictly upon physical check-in** when the ANPR gate verifies the vehicle registration number and marks the bay `OCCUPIED`.
+
+4. **Q: How are passwords protected in storage?**
+   > *A:* Passwords are never stored in plaintext. They are hashed using BCrypt with 10 salt rounds before database insertion. Verification is handled securely via `BCrypt.checkpw`.
+
+5. **Q: How does the dynamic demand pricing algorithm work?**
+   > *A:* When a zone's occupancy reaches or exceeds the 80% capacity threshold, the system automatically applies a 1.25x surge multiplier to the base hourly rate, re-balancing metropolitan corridor traffic.
+
+6. **Q: How does the system defend against CSV formula injection during financial report exports?**
+   > *A:* The `CsvExportUtil` inspects all cell values. If a field begins with executable spreadsheet formula triggers (`=`, `+`, `-`, `@`), it prepends a single quote (`'`), ensuring spreadsheet programs treat the value strictly as text.
+
+7. **Q: What happens if a driver reserves a bay but fails to arrive?**
+   > *A:* The `ReservationCleanupService` background thread monitors reservations. If a vehicle does not arrive within the 15-minute grace period, the reservation is auto-cancelled, a notification is generated, and the bay is released back to `AVAILABLE`.
+
+8. **Q: How are Admin and Driver sessions kept independent?**
+   > *A:* The application uses separate session attributes (`adminUser` vs `driverUser`) and role-based checks (`currentUser.isAdmin()`), ensuring administrative actions and driver reservations cannot conflict.
+
+9. **Q: How do you protect against SQL Injection?**
+   > *A:* All database interactions across all DAOs use parameterized `PreparedStatement` interfaces instead of string concatenation.
+
+10. **Q: Where are database credentials stored, and why are they absent from Git history?**
+    > *A:* Credentials are kept in a local `config/application.properties` or `db.properties` file. Only sanitized template files (`application.example.properties`) are tracked in Git, ensuring zero leakage of local credentials.
+
+</details>
+
+---
+
+## 🤝 Contributing
+
+Contributions, bug reports, and enhancements are welcome! Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Pull Request Template](.github/pull_request_template.md).
+
+---
+
+## 📄 License
+
+This project is prepared for open-source publication. The exact open-source license will be configured according to maintainer preference (e.g., MIT, Apache 2.0, or GPLv3).

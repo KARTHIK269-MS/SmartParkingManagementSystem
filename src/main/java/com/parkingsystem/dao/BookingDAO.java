@@ -4,8 +4,10 @@ import com.parkingsystem.exception.BookingException;
 import com.parkingsystem.exception.DatabaseException;
 import com.parkingsystem.exception.SlotUnavailableException;
 import com.parkingsystem.model.Booking;
+import com.parkingsystem.model.GateActivityEvent;
 import com.parkingsystem.model.Notification;
 import com.parkingsystem.model.Payment;
+import com.parkingsystem.model.Slot;
 import com.parkingsystem.util.DBConnection;
 
 import java.sql.Connection;
@@ -145,7 +147,7 @@ public class BookingDAO {
             conn = DBConnection.getConnection();
             conn.setAutoCommit(false);
 
-            String sqlSelect = "SELECT b.booking_id, b.user_id, b.slot_id, b.entry_time, b.status, z.hourly_rate " +
+            String sqlSelect = "SELECT b.booking_id, b.user_id, b.slot_id, b.entry_time, b.exit_time, b.status, z.hourly_rate " +
                     "FROM bookings b " +
                     "JOIN slots s ON b.slot_id = s.slot_id " +
                     "JOIN zones z ON s.zone_id = z.zone_id " +
@@ -158,9 +160,24 @@ public class BookingDAO {
                 throw new BookingException("Booking #" + bookingId + " not found.");
             }
 
+            String currentStatus = rs.getString("status");
+            if ("COMPLETED".equalsIgnoreCase(currentStatus)) {
+                conn.rollback();
+                return getBookingById(bookingId);
+            }
+            if ("PAYMENT_PENDING".equalsIgnoreCase(currentStatus) && rs.getTimestamp("exit_time") != null) {
+                conn.rollback();
+                return getBookingById(bookingId);
+            }
+            if ("CANCELLED".equalsIgnoreCase(currentStatus)) {
+                conn.rollback();
+                throw new BookingException("Cannot check out a cancelled booking (#" + bookingId + ").");
+            }
+
             Timestamp entryTime = rs.getTimestamp("entry_time");
             if (entryTime == null) {
-                entryTime = new Timestamp(System.currentTimeMillis());
+                conn.rollback();
+                throw new BookingException("Cannot check out booking #" + bookingId + " because vehicle has not checked in (no entry timestamp).");
             }
 
             double rate = (hourlyRate > 0) ? hourlyRate : rs.getDouble("hourly_rate");
@@ -171,13 +188,35 @@ public class BookingDAO {
             int durationHours = (int) Math.max(1, Math.ceil(elapsedSeconds / 3600.0));
             double totalAmount = durationHours * rate;
 
-            String sqlUpdate = "UPDATE bookings SET exit_time = ?, duration_hours = ?, total_amount = ?, status = 'PAYMENT_PENDING' WHERE booking_id = ?";
-            psUpdate = conn.prepareStatement(sqlUpdate);
-            psUpdate.setTimestamp(1, exitTime);
-            psUpdate.setInt(2, durationHours);
-            psUpdate.setDouble(3, totalAmount);
-            psUpdate.setInt(4, bookingId);
-            psUpdate.executeUpdate();
+            double alreadyPaid = 0.0;
+            try (PreparedStatement psPayCheck = conn.prepareStatement("SELECT COALESCE(SUM(amount), 0.0) FROM payments WHERE booking_id = ? AND status = 'SUCCESS'")) {
+                psPayCheck.setInt(1, bookingId);
+                try (ResultSet rsPay = psPayCheck.executeQuery()) {
+                    if (rsPay.next()) {
+                        alreadyPaid = rsPay.getDouble(1);
+                    }
+                }
+            }
+
+            if (alreadyPaid > 0 && alreadyPaid >= totalAmount) {
+                // Booking was already fully prepaid - complete booking and release slot back to AVAILABLE
+                String sqlUpdate = "UPDATE bookings SET exit_time = ?, duration_hours = ?, status = 'COMPLETED' WHERE booking_id = ?";
+                psUpdate = conn.prepareStatement(sqlUpdate);
+                psUpdate.setTimestamp(1, exitTime);
+                psUpdate.setInt(2, durationHours);
+                psUpdate.setInt(3, bookingId);
+                psUpdate.executeUpdate();
+                slotDAO.releaseSlot(conn, rs.getString("slot_id"));
+            } else {
+                double billAmount = (alreadyPaid > 0) ? Math.max(0.0, totalAmount - alreadyPaid) : totalAmount;
+                String sqlUpdate = "UPDATE bookings SET exit_time = ?, duration_hours = ?, total_amount = ?, status = 'PAYMENT_PENDING' WHERE booking_id = ?";
+                psUpdate = conn.prepareStatement(sqlUpdate);
+                psUpdate.setTimestamp(1, exitTime);
+                psUpdate.setInt(2, durationHours);
+                psUpdate.setDouble(3, billAmount);
+                psUpdate.setInt(4, bookingId);
+                psUpdate.executeUpdate();
+            }
 
             conn.commit();
             return getBookingById(bookingId);
@@ -216,6 +255,29 @@ public class BookingDAO {
             }
 
             String slotId = rsVerify.getString("slot_id");
+            String currentStatus = rsVerify.getString("status");
+            if ("COMPLETED".equalsIgnoreCase(currentStatus)) {
+                throw new BookingException("Payment has already been finalized for booking #" + bookingId);
+            }
+            if ("CANCELLED".equalsIgnoreCase(currentStatus)) {
+                throw new BookingException("Cannot process payment for a cancelled booking #" + bookingId);
+            }
+            if (payment == null || payment.getAmount() <= 0) {
+                throw new BookingException("Invalid payment amount for booking #" + bookingId + ": Rs " + (payment != null ? payment.getAmount() : 0));
+            }
+            if (payment.getTransactionId() == null || payment.getTransactionId().trim().isEmpty()) {
+                payment.setTransactionId("TXN_" + System.currentTimeMillis() + "_" + bookingId);
+            }
+
+            // Duplicate payment guard: Verify no successful payment record exists for this booking
+            try (PreparedStatement psCheck = conn.prepareStatement("SELECT payment_id FROM payments WHERE booking_id = ? AND status = 'SUCCESS'")) {
+                psCheck.setInt(1, bookingId);
+                try (ResultSet rsCheck = psCheck.executeQuery()) {
+                    if (rsCheck.next()) {
+                        throw new BookingException("Payment has already been finalized for booking #" + bookingId);
+                    }
+                }
+            }
 
             psUpdateBooking = conn.prepareStatement("UPDATE bookings SET status = 'COMPLETED', payment_id = ? WHERE booking_id = ?");
             psUpdateBooking.setString(1, payment.getTransactionId());
@@ -340,11 +402,44 @@ public class BookingDAO {
             conn.setAutoCommit(false);
 
             String cleanPlate = (vehicleNumber != null) ? vehicleNumber.replaceAll("[^A-Za-z0-9]", "").toUpperCase() : "";
+            if (cleanPlate.isEmpty()) {
+                throw new BookingException("Missing vehicle number plate for ANPR check-in.");
+            }
 
-            // Query active RESERVED booking
+            // Concurrency & double check-in guard: Verify vehicle or bay is not already actively parked
+            if (!cleanPlate.isEmpty() || (slotId != null && !slotId.trim().isEmpty())) {
+                String dupSql = "SELECT booking_id, slot_id, vehicle_number FROM bookings WHERE status = 'ACTIVE' " +
+                        "AND (slot_id = ? OR REPLACE(REPLACE(UPPER(vehicle_number), '-', ''), ' ', '') = ?) LIMIT 1";
+                try (PreparedStatement psDup = conn.prepareStatement(dupSql)) {
+                    psDup.setString(1, (slotId != null) ? slotId.trim() : "");
+                    psDup.setString(2, cleanPlate);
+                    try (ResultSet rsDup = psDup.executeQuery()) {
+                        if (rsDup.next()) {
+                            String activeSlot = rsDup.getString("slot_id");
+                            String activeVrn = rsDup.getString("vehicle_number");
+                            String cleanActiveVrn = (activeVrn != null) ? activeVrn.replaceAll("[^A-Za-z0-9]", "").toUpperCase() : "";
+                            if (!cleanPlate.isEmpty() && cleanActiveVrn.equalsIgnoreCase(cleanPlate)) {
+                                throw new BookingException("Duplicate entry attempt: Vehicle [" + vehicleNumber + "] is already checked in and actively parked in Bay [" + activeSlot + "].");
+                            } else {
+                                throw new BookingException("Bay [" + slotId + "] is already occupied by an active parking session.");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Verify slot is not under maintenance
+            if (slotId != null && !slotId.trim().isEmpty()) {
+                Slot curSlot = slotDAO.getSlotById(slotId.trim());
+                if (curSlot != null && "MAINTENANCE".equalsIgnoreCase(curSlot.getStatus())) {
+                    throw new BookingException("Bay [" + slotId + "] is currently under maintenance and cannot be checked in.");
+                }
+            }
+
+            // Query active RESERVED or CONFIRMED booking
             StringBuilder sqlSelect = new StringBuilder(
                     "SELECT b.booking_id, b.user_id, b.slot_id, b.vehicle_number, b.status, b.scheduled_arrival_time, b.expires_at " +
-                    "FROM bookings b WHERE b.status = 'RESERVED' "
+                    "FROM bookings b WHERE b.status IN ('RESERVED', 'CONFIRMED') "
             );
             if (slotId != null && !slotId.trim().isEmpty()) {
                 sqlSelect.append("AND b.slot_id = ? ");
@@ -365,17 +460,48 @@ public class BookingDAO {
 
             rs = psSelect.executeQuery();
             if (!rs.next()) {
-                throw new BookingException("No active reservation found for vehicle plate [" + vehicleNumber + "] or bay [" + slotId + "].");
+                // Diagnostic check to give the exact reason for rejection
+                String diagSql = "SELECT b.booking_id, b.user_id, b.slot_id, b.vehicle_number, b.status, b.expires_at " +
+                        "FROM bookings b WHERE (REPLACE(REPLACE(UPPER(b.vehicle_number), '-', ''), ' ', '') = ? " +
+                        "OR (b.slot_id = ? AND b.status IN ('RESERVED', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'ACTIVE'))) " +
+                        "ORDER BY b.booking_id DESC LIMIT 1";
+                try (PreparedStatement psDiag = conn.prepareStatement(diagSql)) {
+                    psDiag.setString(1, cleanPlate);
+                    psDiag.setString(2, (slotId != null) ? slotId.trim() : "");
+                    try (ResultSet rsDiag = psDiag.executeQuery()) {
+                        if (rsDiag.next()) {
+                            int dBookingId = rsDiag.getInt("booking_id");
+                            String dStatus = rsDiag.getString("status");
+                            String dSlot = rsDiag.getString("slot_id");
+                            String dVrn = rsDiag.getString("vehicle_number");
+                            String cleanDVrn = (dVrn != null) ? dVrn.replaceAll("[^A-Za-z0-9]", "").toUpperCase() : "";
+
+                            if (!cleanPlate.isEmpty() && cleanPlate.equalsIgnoreCase(cleanDVrn) && "CANCELLED".equalsIgnoreCase(dStatus)) {
+                                throw new BookingException("Entry rejected: Reservation #" + dBookingId + " for vehicle [" + (cleanDVrn.isEmpty() ? vehicleNumber : dVrn) + "] has been CANCELLED.");
+                            } else if (!cleanPlate.isEmpty() && cleanPlate.equalsIgnoreCase(cleanDVrn) && "COMPLETED".equalsIgnoreCase(dStatus)) {
+                                throw new BookingException("Entry rejected: Booking #" + dBookingId + " for vehicle [" + (cleanDVrn.isEmpty() ? vehicleNumber : dVrn) + "] has already been COMPLETED.");
+                            } else if (slotId != null && !slotId.trim().isEmpty() && dSlot != null && dSlot.equalsIgnoreCase(slotId.trim()) && ("RESERVED".equalsIgnoreCase(dStatus) || "CONFIRMED".equalsIgnoreCase(dStatus) || "ACTIVE".equalsIgnoreCase(dStatus)) && !cleanPlate.equalsIgnoreCase(cleanDVrn)) {
+                                throw new BookingException("Entry rejected: Scanned plate [" + vehicleNumber + "] does not match reserved vehicle [" + dVrn + "] for Bay [" + slotId + "].");
+                            } else if (!cleanPlate.isEmpty() && cleanPlate.equalsIgnoreCase(cleanDVrn) && slotId != null && !slotId.trim().isEmpty() && !slotId.trim().equalsIgnoreCase(dSlot)) {
+                                throw new BookingException("Entry rejected: Vehicle [" + vehicleNumber + "] is reserved for Bay [" + dSlot + "], not Bay [" + slotId + "].");
+                            } else if (userId != null && !userId.trim().isEmpty() && !userId.trim().equalsIgnoreCase(rsDiag.getString("user_id"))) {
+                                throw new BookingException("Entry rejected: Reservation #" + dBookingId + " belongs to another driver account.");
+                            }
+                        }
+                    }
+                }
+                throw new BookingException("Entry rejected: Unknown number plate [" + vehicleNumber + "]. No active reservation found.");
             }
 
             int bookingId = rs.getInt("booking_id");
+            String bookingStatus = rs.getString("status");
             String actualSlotId = rs.getString("slot_id");
             String bookingUserId = rs.getString("user_id");
             Timestamp expiresAt = rs.getTimestamp("expires_at");
             Timestamp now = new Timestamp(System.currentTimeMillis());
 
-            // If 15-minute grace window expired, reject check-in and auto-cancel
-            if (expiresAt != null && now.after(expiresAt)) {
+            // If 15-minute grace window expired for unconfirmed reservation, reject check-in and auto-cancel
+            if ("RESERVED".equals(bookingStatus) && expiresAt != null && now.after(expiresAt)) {
                 conn.rollback();
                 cancelExpiredReservations(15);
                 throw new BookingException("Reservation #" + bookingId + " has expired (exceeded 15-minute arrival window). The bay has been released.");
@@ -389,9 +515,9 @@ public class BookingDAO {
             psUpdateBooking.setInt(2, bookingId);
             psUpdateBooking.executeUpdate();
 
-            // 2. Update slot: status = 'BOOKED' (occupied)
+            // 2. Update slot: status = 'OCCUPIED' (occupied)
             psUpdateSlot = conn.prepareStatement(
-                    "UPDATE slots SET status = 'BOOKED' WHERE slot_id = ?"
+                    "UPDATE slots SET status = 'OCCUPIED' WHERE slot_id = ?"
             );
             psUpdateSlot.setString(1, actualSlotId);
             psUpdateSlot.executeUpdate();
@@ -414,9 +540,11 @@ public class BookingDAO {
 
         } catch (BookingException be) {
             DBConnection.rollback(conn);
+            recordRejectedGateAttempt(vehicleNumber, slotId, userId, be.getMessage(), "Simulated ANPR Camera");
             throw be;
         } catch (SQLException e) {
             DBConnection.rollback(conn);
+            recordRejectedGateAttempt(vehicleNumber, slotId, userId, "Database error: " + e.getMessage(), "Simulated ANPR Camera");
             throw new DatabaseException("Plate check-in error: " + e.getMessage(), e);
         } finally {
             DBConnection.close(null, psSelect, rs);
@@ -491,9 +619,8 @@ public class BookingDAO {
                 psUpdateBooking.setInt(2, bId);
                 psUpdateBooking.executeUpdate();
 
-                // Release slot back to AVAILABLE
-                psReleaseSlot.setString(1, sId);
-                psReleaseSlot.executeUpdate();
+                // Release slot back to AVAILABLE safely
+                slotDAO.releaseSlot(conn, sId);
 
                 // Send and persist cancellation notification to driver
                 Notification n = new Notification(
@@ -565,9 +692,8 @@ public class BookingDAO {
             psUpdate.setInt(1, bookingId);
             psUpdate.executeUpdate();
 
-            psRelease = conn.prepareStatement("UPDATE slots SET status = 'AVAILABLE' WHERE slot_id = ?");
-            psRelease.setString(1, slotId);
-            psRelease.executeUpdate();
+            // Safely release slot back to AVAILABLE
+            slotDAO.releaseSlot(conn, slotId);
 
             conn.commit();
             return true;
@@ -965,18 +1091,41 @@ public class BookingDAO {
             conn = DBConnection.getConnection();
             stmt = conn.createStatement();
 
-            // Total revenue from confirmed and completed bookings
-            rs = stmt.executeQuery("SELECT COALESCE(SUM(total_amount), 0) AS total_revenue, COUNT(*) AS total_count FROM bookings WHERE status IN ('CONFIRMED', 'COMPLETED')");
+            // Total collected revenue strictly from settled successful payments (excludes cancelled, unpaid, and active accruals)
+            rs = stmt.executeQuery("SELECT COALESCE(SUM(amount), 0) AS total_revenue, COUNT(*) AS total_paid_txns FROM payments WHERE status = 'SUCCESS'");
             if (rs.next()) {
                 stats.put("totalRevenue", rs.getDouble("total_revenue"));
+                stats.put("totalPaidTransactions", rs.getInt("total_paid_txns"));
+                stats.put("verifiedPaidSum", rs.getDouble("total_revenue"));
+            }
+
+            // Total confirmed/completed bookings count
+            rs.close();
+            rs = stmt.executeQuery("SELECT COUNT(*) AS total_count FROM bookings WHERE status IN ('CONFIRMED', 'COMPLETED')");
+            if (rs.next()) {
                 stats.put("totalConfirmedBookings", rs.getInt("total_count"));
             }
 
-            // Today's revenue
+            // Today's collected revenue strictly from settled payments where payment_time is in current operating day
             rs.close();
-            rs = stmt.executeQuery("SELECT COALESCE(SUM(total_amount), 0) AS today_revenue FROM bookings WHERE status IN ('CONFIRMED', 'COMPLETED') AND DATE(booking_time) = CURDATE()");
+            rs = stmt.executeQuery("SELECT COALESCE(SUM(amount), 0) AS today_revenue FROM payments WHERE status = 'SUCCESS' AND DATE(payment_time) = CURDATE()");
             if (rs.next()) {
                 stats.put("todayRevenue", rs.getDouble("today_revenue"));
+            }
+
+            // Pending revenue: vehicles that departed bay but payment is awaiting completion
+            rs.close();
+            rs = stmt.executeQuery("SELECT COALESCE(SUM(total_amount), 0) AS pending_revenue, COUNT(*) AS pending_count FROM bookings WHERE status = 'PAYMENT_PENDING'");
+            if (rs.next()) {
+                stats.put("pendingRevenue", rs.getDouble("pending_revenue"));
+                stats.put("pendingCount", rs.getInt("pending_count"));
+            }
+
+            // Cancelled bookings count (explicitly excluded from revenue accounting)
+            rs.close();
+            rs = stmt.executeQuery("SELECT COUNT(*) AS cancelled_count FROM bookings WHERE status = 'CANCELLED'");
+            if (rs.next()) {
+                stats.put("cancelledBookingsCount", rs.getInt("cancelled_count"));
             }
 
             return stats;
@@ -988,15 +1137,15 @@ public class BookingDAO {
     }
 
     /**
-     * AI ANALYTICS: 24-Hour Occupancy Curve
+     * Analytics: 24-Hour Occupancy Curve
      * Aggregates hourly vehicle check-ins and bookings across the 24 hours of the day (00:00 to 23:00).
-     * Blends live database counts with realistic urban parking flow (morning & evening rush hour peaks).
+    /**
+     * Analytics: 24-Hour Occupancy Curve
+     * Aggregates hourly vehicle check-ins and bookings across the 24 hours of the day (00:00 to 23:00).
+     * Strictly reflects genuine database records; contains zero synthetic baseline values.
      */
     public int[] get24HourOccupancyCurve() throws DatabaseException {
-        // Base urban traffic pattern: low at night, spikes 8-10 AM (morning rush), steady afternoon, spikes 17-20 PM (evening rush)
-        int[] baseline = new int[]{5, 3, 2, 2, 4, 8, 18, 35, 78, 85, 62, 54, 48, 52, 58, 65, 82, 94, 88, 72, 50, 36, 22, 12};
         int[] hourlyData = new int[24];
-        System.arraycopy(baseline, 0, hourlyData, 0, 24);
 
         Connection conn = null;
         Statement stmt = null;
@@ -1026,18 +1175,12 @@ public class BookingDAO {
     }
 
     /**
-     * AI ANALYTICS: Metropolitan Revenue Breakdown by City
-     * Aggregates parking revenue across the 6 major Indian metropolitan hubs:
-     * Mumbai, Bengaluru, New Delhi, Hyderabad, Chennai, Kolkata.
+     * Analytics: Metropolitan Revenue Breakdown by City
+     * Aggregates settled parking revenue strictly from successful payments joined to facilities.
+     * Contains only cities with genuine settled revenue; no artificial placeholder bars.
      */
     public Map<String, Double> getRevenueByCityData() throws DatabaseException {
         Map<String, Double> cityRevenue = new LinkedHashMap<>();
-        cityRevenue.put("Mumbai", 12500.0);
-        cityRevenue.put("Bengaluru", 10800.0);
-        cityRevenue.put("New Delhi", 9200.0);
-        cityRevenue.put("Hyderabad", 7600.0);
-        cityRevenue.put("Chennai", 6400.0);
-        cityRevenue.put("Kolkata", 5100.0);
 
         Connection conn = null;
         Statement stmt = null;
@@ -1056,20 +1199,19 @@ public class BookingDAO {
                     "  WHEN z.zone_id IN ('F', 'KOL-2', 'KOL-3', 'KOL-4') OR z.name LIKE '%Kolkata%' THEN 'Kolkata' " +
                     "  ELSE 'Other' " +
                     "END AS city_name, " +
-                    "SUM(b.total_amount) AS rev " +
-                    "FROM bookings b " +
+                    "SUM(p.amount) AS rev " +
+                    "FROM payments p " +
+                    "JOIN bookings b ON p.booking_id = b.booking_id " +
                     "JOIN slots s ON b.slot_id = s.slot_id " +
                     "JOIN zones z ON s.zone_id = z.zone_id " +
-                    "WHERE b.status IN ('CONFIRMED', 'COMPLETED') " +
+                    "WHERE p.status = 'SUCCESS' " +
                     "GROUP BY city_name";
             rs = stmt.executeQuery(sql);
             while (rs.next()) {
                 String c = rs.getString("city_name");
                 double rev = rs.getDouble("rev");
-                if (c != null && cityRevenue.containsKey(c)) {
-                    cityRevenue.put(c, cityRevenue.get(c) + rev);
-                } else if (c != null && !c.equals("Other")) {
-                    cityRevenue.put(c, rev);
+                if (c != null && rev > 0.0) {
+                    cityRevenue.put(c, cityRevenue.getOrDefault(c, 0.0) + rev);
                 }
             }
             return cityRevenue;
@@ -1081,17 +1223,12 @@ public class BookingDAO {
     }
 
     /**
-     * AI ANALYTICS: Payment Method Distribution
-     * Returns transaction counts across payment channels:
-     * UPI (GPay/PhonePe), FASTag (Contactless RFID), Cards, Net Banking, and Wallet.
+     * Analytics: Payment Method Distribution
+     * Returns genuine transaction counts across payment channels from settled transactions.
+     * Contains only payment methods present in verified successful payment records.
      */
     public Map<String, Integer> getPaymentMethodDistributionData() throws DatabaseException {
         Map<String, Integer> dist = new LinkedHashMap<>();
-        dist.put("UPI", 42);
-        dist.put("FASTag", 28);
-        dist.put("CARD", 16);
-        dist.put("NET_BANKING", 8);
-        dist.put("WALLET", 6);
 
         Connection conn = null;
         Statement stmt = null;
@@ -1105,7 +1242,7 @@ public class BookingDAO {
             while (rs.next()) {
                 String m = rs.getString("payment_method");
                 int cnt = rs.getInt("cnt");
-                if (m != null) {
+                if (m != null && cnt > 0) {
                     m = m.trim().toUpperCase();
                     dist.put(m, dist.getOrDefault(m, 0) + cnt);
                 }
@@ -1117,4 +1254,281 @@ public class BookingDAO {
             DBConnection.close(conn, stmt, rs);
         }
     }
+
+    /**
+     * Checks if a slot currently has an active user reservation or parking session.
+     * Prevents administrative actions or IoT simulation from overwriting real user bookings.
+     */
+    public boolean hasActiveBookingForSlot(String slotId) throws DatabaseException {
+        if (slotId == null || slotId.trim().isEmpty()) return false;
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DBConnection.getConnection();
+            String sql = "SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND (" +
+                         "status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') OR " +
+                         "(status IN ('PENDING', 'CONFIRMED', 'RESERVED') AND (expires_at IS NULL OR expires_at > NOW())))";
+            ps = conn.prepareStatement(sql);
+            ps.setString(1, slotId.trim().toUpperCase());
+            rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+            return false;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to check active booking for slot: " + slotId, e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    /**
+     * Retrieves the latest active booking for a slot (if any) for authorized inspection.
+     */
+    public Booking getActiveBookingForSlot(String slotId) throws DatabaseException {
+        if (slotId == null || slotId.trim().isEmpty()) return null;
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DBConnection.getConnection();
+            String sql = "SELECT booking_id, user_id, slot_id, vehicle_number, duration_hours, total_amount, status, " +
+                         "booking_time, entry_time, exit_time, scheduled_arrival_time " +
+                         "FROM bookings WHERE slot_id = ? AND (" +
+                         "status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') OR " +
+                         "(status IN ('PENDING', 'CONFIRMED', 'RESERVED') AND (expires_at IS NULL OR expires_at > NOW()))) " +
+                         "ORDER BY booking_id DESC LIMIT 1";
+            ps = conn.prepareStatement(sql);
+            ps.setString(1, slotId.trim().toUpperCase());
+            rs = ps.executeQuery();
+            if (rs.next()) {
+                Booking b = new Booking();
+                b.setBookingId(rs.getInt("booking_id"));
+                b.setUserId(rs.getString("user_id"));
+                b.setSlotId(rs.getString("slot_id"));
+                b.setVehicleNumber(rs.getString("vehicle_number"));
+                b.setDurationHours(rs.getInt("duration_hours"));
+                b.setTotalAmount(rs.getDouble("total_amount"));
+                b.setStatus(rs.getString("status"));
+                b.setBookingTime(rs.getTimestamp("booking_time"));
+                b.setEntryTime(rs.getTimestamp("entry_time"));
+                b.setExitTime(rs.getTimestamp("exit_time"));
+                try {
+                    b.setScheduledArrivalTime(rs.getTimestamp("scheduled_arrival_time"));
+                } catch (Exception ignored) {}
+                return b;
+            }
+            return null;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to retrieve active booking for slot: " + slotId, e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    /**
+     * HYPERPARK ACTIVE PARKING SESSIONS:
+     * Retrieves all vehicles currently parked in bays (status 'ACTIVE' or 'PAYMENT_PENDING').
+     * Computes real-time dynamic tariff rates, elapsed seconds, and live accrued estimated charges.
+     */
+    public List<Booking> getActiveParkingSessions() throws DatabaseException {
+        List<Booking> sessions = new ArrayList<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DBConnection.getConnection();
+            String sql = "SELECT b.booking_id, b.user_id, b.slot_id, b.vehicle_number, b.duration_hours, b.total_amount, " +
+                    "b.status, b.booking_time, b.entry_time, b.exit_time, b.expires_at, b.scheduled_arrival_time, b.cancellation_reason, b.payment_id, " +
+                    "u.name AS user_name, u.email AS user_email, s.zone_id, z.name AS zone_name, z.hourly_rate " +
+                    "FROM bookings b " +
+                    "JOIN slots s ON b.slot_id = s.slot_id " +
+                    "JOIN zones z ON s.zone_id = z.zone_id " +
+                    "JOIN users u ON b.user_id = u.user_id " +
+                    "WHERE b.status IN ('ACTIVE', 'PAYMENT_PENDING') AND b.entry_time IS NOT NULL " +
+                    "ORDER BY b.entry_time DESC";
+
+            ps = conn.prepareStatement(sql);
+            rs = ps.executeQuery();
+
+            ZoneDAO zoneDAO = new ZoneDAO();
+
+            while (rs.next()) {
+                Booking b = new Booking();
+                b.setBookingId(rs.getInt("booking_id"));
+                b.setUserId(rs.getString("user_id"));
+                b.setSlotId(rs.getString("slot_id"));
+                b.setVehicleNumber(rs.getString("vehicle_number"));
+                b.setDurationHours(rs.getInt("duration_hours"));
+                b.setTotalAmount(rs.getDouble("total_amount"));
+                b.setStatus(rs.getString("status"));
+                b.setBookingTime(rs.getTimestamp("booking_time"));
+                b.setEntryTime(rs.getTimestamp("entry_time"));
+                b.setExitTime(rs.getTimestamp("exit_time"));
+                b.setExpiresAt(rs.getTimestamp("expires_at"));
+                b.setScheduledArrivalTime(rs.getTimestamp("scheduled_arrival_time"));
+                b.setCancellationReason(rs.getString("cancellation_reason"));
+                b.setPaymentId(rs.getString("payment_id"));
+                b.setUserName(rs.getString("user_name"));
+                b.setUserEmail(rs.getString("user_email"));
+                b.setZoneId(rs.getString("zone_id"));
+
+                double baseRate = rs.getDouble("hourly_rate");
+                if (baseRate <= 0) baseRate = 40.0;
+
+                double effectiveRate = baseRate;
+                try {
+                    com.parkingsystem.model.Zone zone = zoneDAO.getZoneById(b.getZoneId());
+                    if (zone != null) {
+                        effectiveRate = zone.getEffectiveHourlyRate();
+                    }
+                } catch (Exception ignored) {}
+
+                b.setHourlyRate(effectiveRate);
+                sessions.add(b);
+            }
+            return sessions;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to fetch active parking sessions: " + e.getMessage(), e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    /**
+     * HYPERPARK GATE ACTIVITY LEDGER:
+     * Chronological audit stream of simulated vehicle entry and exit movements across facilities.
+     * All gate camera (ANPR) and sensor triggers are prototype simulations.
+     */
+    public List<GateActivityEvent> getRecentGateActivity(int limit) throws DatabaseException {
+        if (limit <= 0) limit = 25;
+        List<GateActivityEvent> events = new ArrayList<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DBConnection.getConnection();
+            String sql = "SELECT * FROM (" +
+                    "  SELECT b.booking_id, b.vehicle_number, b.user_id, u.name AS user_name, b.slot_id, s.zone_id, z.name AS zone_name, " +
+                    "         'ENTRY' AS event_type, b.entry_time AS event_time, " +
+                    "         'Simulated ANPR Camera' AS event_source, " +
+                    "         'Admitted & Bay Occupied' AS event_result, " +
+                    "         b.status AS booking_status, b.total_amount, " +
+                    "         CASE WHEN b.status = 'COMPLETED' THEN 'COMPLETED' WHEN b.status = 'PAYMENT_PENDING' THEN 'PENDING' ELSE 'ESTIMATED' END AS payment_status, " +
+                    "         COALESCE(p.payment_method, '-') AS payment_method, " +
+                    "         COALESCE(b.payment_id, COALESCE(p.transaction_id, '-')) AS transaction_id, " +
+                    "         b.booking_time, b.entry_time, b.exit_time " +
+                    "  FROM bookings b " +
+                    "  JOIN users u ON b.user_id = u.user_id " +
+                    "  JOIN slots s ON b.slot_id = s.slot_id " +
+                    "  JOIN zones z ON s.zone_id = z.zone_id " +
+                    "  LEFT JOIN payments p ON b.booking_id = p.booking_id " +
+                    "  WHERE b.entry_time IS NOT NULL " +
+                    "  UNION ALL " +
+                    "  SELECT b.booking_id, b.vehicle_number, b.user_id, u.name AS user_name, b.slot_id, s.zone_id, z.name AS zone_name, " +
+                    "         'EXIT' AS event_type, b.exit_time AS event_time, " +
+                    "         'Simulated Outgate Sensor' AS event_source, " +
+                    "         CASE WHEN b.status = 'COMPLETED' THEN 'Departed • Bill Paid' ELSE 'Departed • Awaiting Payment' END AS event_result, " +
+                    "         b.status AS booking_status, b.total_amount, " +
+                    "         CASE WHEN b.status = 'COMPLETED' THEN 'COMPLETED' ELSE 'PENDING' END AS payment_status, " +
+                    "         COALESCE(p.payment_method, '-') AS payment_method, " +
+                    "         COALESCE(b.payment_id, COALESCE(p.transaction_id, '-')) AS transaction_id, " +
+                    "         b.booking_time, b.entry_time, b.exit_time " +
+                    "  FROM bookings b " +
+                    "  JOIN users u ON b.user_id = u.user_id " +
+                    "  JOIN slots s ON b.slot_id = s.slot_id " +
+                    "  JOIN zones z ON s.zone_id = z.zone_id " +
+                    "  LEFT JOIN payments p ON b.booking_id = p.booking_id " +
+                    "  WHERE b.exit_time IS NOT NULL " +
+                    ") combined_events " +
+                    "ORDER BY event_time DESC LIMIT ?";
+
+            ps = conn.prepareStatement(sql);
+            ps.setInt(1, limit);
+            rs = ps.executeQuery();
+
+            while (rs.next()) {
+                GateActivityEvent evt = new GateActivityEvent();
+                evt.setBookingId(rs.getInt("booking_id"));
+                evt.setVehicleNumber(rs.getString("vehicle_number"));
+                evt.setUserId(rs.getString("user_id"));
+                evt.setUserName(rs.getString("user_name"));
+                evt.setSlotId(rs.getString("slot_id"));
+                evt.setZoneId(rs.getString("zone_id"));
+                evt.setZoneName(rs.getString("zone_name"));
+                evt.setEventType(rs.getString("event_type"));
+                evt.setEventTime(rs.getTimestamp("event_time"));
+                evt.setEventSource(rs.getString("event_source"));
+                evt.setEventResult(rs.getString("event_result"));
+                evt.setBookingStatus(rs.getString("booking_status"));
+                evt.setAmount(rs.getDouble("total_amount"));
+                evt.setPaymentStatus(rs.getString("payment_status"));
+                evt.setPaymentMethod(rs.getString("payment_method"));
+                evt.setTransactionId(rs.getString("transaction_id"));
+                evt.setBookingTime(rs.getTimestamp("booking_time"));
+                evt.setEntryTime(rs.getTimestamp("entry_time"));
+                evt.setExitTime(rs.getTimestamp("exit_time"));
+                events.add(evt);
+            }
+
+            // Merge rejected gate events with recorded database movement events
+            for (GateActivityEvent rej : REJECTED_GATE_EVENTS) {
+                events.add(rej);
+            }
+
+            // Sort all events chronologically (newest first)
+            events.sort((a, b) -> {
+                if (a.getEventTime() == null && b.getEventTime() == null) return 0;
+                if (a.getEventTime() == null) return 1;
+                if (b.getEventTime() == null) return -1;
+                return b.getEventTime().compareTo(a.getEventTime());
+            });
+
+            if (events.size() > limit) {
+                return new ArrayList<>(events.subList(0, limit));
+            }
+            return events;
+        } catch (SQLException e) {
+            throw new DatabaseException("Failed to fetch gate activity: " + e.getMessage(), e);
+        } finally {
+            DBConnection.close(conn, ps, rs);
+        }
+    }
+
+    private static final int MAX_REJECTED_EVENTS = 100;
+    private static final java.util.concurrent.ConcurrentLinkedDeque<GateActivityEvent> REJECTED_GATE_EVENTS = new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /**
+     * Records an authorized or rejected gate access event into the audit ledger.
+     */
+    public static void recordRejectedGateAttempt(String vehicleNumber, String slotId, String userId, String reason, String source) {
+        GateActivityEvent event = new GateActivityEvent();
+        event.setBookingId(0);
+        event.setVehicleNumber((vehicleNumber != null && !vehicleNumber.trim().isEmpty()) ? vehicleNumber.toUpperCase() : "UNKNOWN");
+        event.setUserId((userId != null && !userId.trim().isEmpty()) ? userId : "--");
+        event.setUserName((userId != null && !userId.trim().isEmpty()) ? userId : "Visitor / Unknown");
+        event.setSlotId((slotId != null && !slotId.trim().isEmpty()) ? slotId : "--");
+        event.setZoneId("--");
+        event.setZoneName("Facility Gate");
+        event.setEventType("REJECTED");
+        event.setEventTime(new Timestamp(System.currentTimeMillis()));
+        event.setEventSource((source != null && !source.trim().isEmpty()) ? source : "Simulated ANPR Camera");
+        event.setEventResult(reason != null ? reason : "Access Denied");
+        event.setBookingStatus("REJECTED");
+        event.setAmount(0.0);
+        event.setPaymentStatus("N/A");
+        event.setPaymentMethod("-");
+        event.setTransactionId("-");
+
+        REJECTED_GATE_EVENTS.addFirst(event);
+        while (REJECTED_GATE_EVENTS.size() > MAX_REJECTED_EVENTS) {
+            REJECTED_GATE_EVENTS.pollLast();
+        }
+    }
 }
+

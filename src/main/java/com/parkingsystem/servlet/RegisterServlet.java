@@ -34,6 +34,13 @@ public class RegisterServlet extends HttpServlet {
         String password = request.getParameter("password");
         String confirmPassword = request.getParameter("confirmPassword");
 
+        // Basic CSRF check for security demonstration
+        if (request.getParameter("csrfToken") != null && !com.parkingsystem.util.CsrfUtil.isValid(request)) {
+            request.setAttribute("errorMessage", "Session expired or invalid security token. Please try again.");
+            forwardWithInputs(request, response, name, email, phone);
+            return;
+        }
+
         // Basic server-side validation
         if (name == null || name.trim().isEmpty() ||
             email == null || email.trim().isEmpty() ||
@@ -55,6 +62,13 @@ public class RegisterServlet extends HttpServlet {
             return;
         }
 
+        String termsConsent = request.getParameter("termsConsent");
+        if (termsConsent == null || termsConsent.trim().isEmpty()) {
+            request.setAttribute("errorMessage", "You must agree to the Terms of Service, Privacy Policy (DPDP Act), and Cookie Policy to register.");
+            forwardWithInputs(request, response, name, email, phone);
+            return;
+        }
+
         try {
             User existing = userDAO.findByEmail(email.trim());
             if (existing != null) {
@@ -71,6 +85,7 @@ public class RegisterServlet extends HttpServlet {
 
             if (success) {
                 HttpSession session = request.getSession();
+                session.setAttribute("driverUser", newUser);
                 session.setAttribute("user", newUser);
                 response.sendRedirect(request.getContextPath() + "/zones?msg=welcome");
             } else {

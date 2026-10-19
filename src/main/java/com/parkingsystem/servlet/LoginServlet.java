@@ -51,6 +51,13 @@ public class LoginServlet extends HttpServlet {
 
     private void handleLogin(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
+        // Basic CSRF check for security demonstration
+        if (request.getParameter("csrfToken") != null && !com.parkingsystem.util.CsrfUtil.isValid(request)) {
+            request.setAttribute("errorMessage", "Session expired or invalid security token. Please try again.");
+            request.getRequestDispatcher("/login.jsp").forward(request, response);
+            return;
+        }
+
         String email = request.getParameter("email");
         String password = request.getParameter("password");
 
@@ -61,8 +68,7 @@ public class LoginServlet extends HttpServlet {
         }
 
         try {
-            String passwordHash = PasswordHasher.hash(password);
-            User user = userDAO.authenticate(email.trim(), passwordHash);
+            User user = userDAO.authenticate(email.trim(), password);
 
             if (user == null) {
                 request.setAttribute("errorMessage", "Invalid email or password. Please try again.");
@@ -72,11 +78,16 @@ public class LoginServlet extends HttpServlet {
             }
 
             HttpSession session = request.getSession();
-            session.setAttribute("user", user);
-
             if (user.isAdmin()) {
+                session.setAttribute("adminUser", user);
+                // Set fallback "user" if no driver is currently logged in
+                if (session.getAttribute("driverUser") == null) {
+                    session.setAttribute("user", user);
+                }
                 response.sendRedirect(request.getContextPath() + "/admin?action=dashboard");
             } else {
+                session.setAttribute("driverUser", user);
+                session.setAttribute("user", user);
                 response.sendRedirect(request.getContextPath() + "/zones");
             }
 
@@ -90,7 +101,48 @@ public class LoginServlet extends HttpServlet {
             throws IOException {
         HttpSession session = request.getSession(false);
         if (session != null) {
-            session.invalidate();
+            String role = request.getParameter("role");
+            if ("admin".equalsIgnoreCase(role)) {
+                session.removeAttribute("adminUser");
+                User driverUser = (User) session.getAttribute("driverUser");
+                if (driverUser != null) {
+                    session.setAttribute("user", driverUser);
+                } else {
+                    session.removeAttribute("user");
+                    session.invalidate();
+                }
+            } else if ("driver".equalsIgnoreCase(role)) {
+                session.removeAttribute("driverUser");
+                User adminUser = (User) session.getAttribute("adminUser");
+                if (adminUser != null) {
+                    session.setAttribute("user", adminUser);
+                } else {
+                    session.removeAttribute("user");
+                    session.invalidate();
+                }
+            } else {
+                // If no explicit role specified, check Referer
+                String referer = request.getHeader("Referer");
+                if (referer != null && referer.contains("/admin")) {
+                    session.removeAttribute("adminUser");
+                    User driverUser = (User) session.getAttribute("driverUser");
+                    if (driverUser != null) {
+                        session.setAttribute("user", driverUser);
+                    } else {
+                        session.removeAttribute("user");
+                        session.invalidate();
+                    }
+                } else {
+                    session.removeAttribute("driverUser");
+                    User adminUser = (User) session.getAttribute("adminUser");
+                    if (adminUser != null) {
+                        session.setAttribute("user", adminUser);
+                    } else {
+                        session.removeAttribute("user");
+                        session.invalidate();
+                    }
+                }
+            }
         }
         response.sendRedirect(request.getContextPath() + "/login?msg=logged_out");
     }

@@ -1,14 +1,19 @@
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <%@ page import="com.parkingsystem.model.User" %>
 <%
-    User currentUser = (User) session.getAttribute("user");
+    User currentUser = (User) session.getAttribute("driverUser");
+    if (currentUser == null) {
+        currentUser = (User) session.getAttribute("user");
+    }
 %>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ANPR Camera & IoT Gate Barrier Terminal | Smart Parking</title>
+    <meta name="description" content="Simulated ANPR license plate camera scanner and IoT gate barrier demonstration terminal.">
+    <title>SmartParking | ANPR Camera Scanner</title>
+    <link rel="icon" type="image/svg+xml" href="<%= request.getContextPath() %>/resources/images/favicon.svg">
     <link rel="stylesheet" href="<%= request.getContextPath() %>/resources/css/style.css">
     <style>
         .anpr-container {
@@ -151,12 +156,12 @@
     <nav class="navbar">
         <a href="<%= request.getContextPath() %>/zones" class="navbar-brand">
             <div class="brand-icon">P</div>
-            <span>SmartParking<span class="brand-tag">ANPR GATEWAY</span></span>
+            <span>SmartParking<span class="brand-tag">SYSTEM</span></span>
         </a>
         <ul class="nav-links">
-            <li><a href="<%= request.getContextPath() %>/zones" class="nav-link">Zones</a></li>
+            <li><a href="<%= request.getContextPath() %>/zones" class="nav-link">Parking Zones</a></li>
             <li><a href="<%= request.getContextPath() %>/booking?action=myBookings" class="nav-link">My Bookings</a></li>
-            <li><a href="<%= request.getContextPath() %>/anpr.jsp" class="nav-link active">📷 ANPR Gate Station</a></li>
+            <li><a href="<%= request.getContextPath() %>/anpr.jsp" class="nav-link active">ANPR Gate Simulation</a></li>
         </ul>
         <div class="nav-actions">
             <% if (currentUser != null) { %>
@@ -174,10 +179,10 @@
         <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
             <div>
                 <h1 style="font-size: 1.8rem; font-weight: 900; color: var(--color-primary); display: flex; align-items: center; gap: 10px;">
-                    <span>📷</span> Automatic Number Plate Recognition (ANPR) &amp; IoT Barrier Gate
+                    <span>📷</span> Simulated ANPR Camera &amp; Gate Barrier Terminal (Prototype Demo)
                 </h1>
                 <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px;">
-                    Optical plate localization, character recognition, and automated barrier control for Smart Urban Parking.
+                    Simulated optical number plate detection and automated barrier gate for academic demonstration.
                 </p>
             </div>
             <a href="<%= request.getContextPath() %>/booking?action=myBookings" class="btn btn-secondary btn-sm">
@@ -191,17 +196,17 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span class="pulse-dot" style="background: #10b981;"></span>
-                        <strong style="font-size: 0.92rem; letter-spacing: 0.5px;">ANPR BARRIER CAMERA (4K HD SENSOR)</strong>
+                        <strong style="font-size: 0.92rem; letter-spacing: 0.5px;">ENTRANCE GATE CAMERA</strong>
                     </div>
                     <span style="font-size: 0.75rem; background: #1e293b; padding: 4px 10px; border-radius: 6px; color: #94a3b8;">
-                        FPS: 30 • ISO: AUTO
+                        30 FPS
                     </span>
                 </div>
 
                 <div class="camera-viewport" id="viewport">
                     <video id="videoFeed" class="camera-video" autoplay playsinline muted></video>
                     <canvas id="snapshotCanvas" style="display: none;"></canvas>
-                    <img id="staticPreview" style="max-width: 100%; max-height: 100%; display: none; object-fit: contain;">
+                    <img id="staticPreview" alt="Uploaded vehicle plate preview" style="max-width: 100%; max-height: 100%; display: none; object-fit: contain;">
 
                     <div id="cameraPlaceholder" style="text-align: center; padding: 20px;">
                         <div style="font-size: 2.4rem; margin-bottom: 10px;">📷</div>
@@ -231,21 +236,21 @@
 
                 <div style="margin-top: 10px; display: flex; gap: 8px;">
                     <button type="button" id="btnScanPlate" onclick="captureAndProcessANPR()" class="btn btn-primary btn-block" style="background: #059669; border: none; font-weight: 800; font-size: 1rem; padding: 12px;" disabled>
-                        <span>⚡</span> Capture &amp; Run ANPR Check-In &rarr;
+                        <span>📷</span> Scan Plate &amp; Check-In &rarr;
                     </button>
                 </div>
             </div>
 
             <!-- Right Column: Recognition Result & Gate Controller -->
             <div>
-                <!-- Simulated Physical Barrier Box -->
+                <!-- Barrier Box -->
                 <div class="card" style="padding: 24px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
                         <span style="font-weight: 800; color: var(--color-primary); font-size: 0.95rem;">
-                            🚧 SERVO BOOM BARRIER (IoT ACTUATOR)
+                            🚧 ENTRANCE BOOM BARRIER
                         </span>
                         <span id="barrierStatusBadge" class="status-pill closed">
-                            <span>🔴</span> Barrier Lowered (Locked)
+                            <span>🔴</span> Barrier Lowered (Closed)
                         </span>
                     </div>
 
@@ -255,7 +260,7 @@
                             <div id="barrierArm" class="barrier-arm"></div>
                         </div>
                         <div style="flex: 1; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
-                            Connected to SG90 / MG996R servo motor on Raspberry Pi GPIO / ESP32. Opens automatically upon plate verification.
+                            Controls entrance barrier arm via servo motor upon vehicle number plate verification.
                         </div>
                     </div>
                 </div>
@@ -269,6 +274,11 @@
                     <div class="form-group" style="margin-bottom: 16px;">
                         <label class="form-label" for="targetSlotId">Target Parking Bay ID</label>
                         <input type="text" id="targetSlotId" class="form-control" value="A1" style="font-weight: 800; font-family: monospace;" required>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label class="form-label" for="manualPlateInput">Vehicle Plate Number (Manual Entry or Auto-Scan)</label>
+                        <input type="text" id="manualPlateInput" class="form-control" value="KA01AB1234" placeholder="e.g. KA01AB1234" style="font-weight: 800; font-family: monospace; text-transform: uppercase;">
                     </div>
 
                     <div style="margin-bottom: 16px;">
@@ -289,6 +299,9 @@
 
                     <div id="successBanner" style="display: none; margin-top: 16px; background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--border-radius-md); padding: 14px; color: #166534; font-size: 0.88rem;">
                         <strong>✓ Vehicle Checked-In:</strong> Bay is now <strong>OCCUPIED</strong>. Barrier open. Live parking meter started!
+                    </div>
+                    <div id="errorBanner" style="display: none; margin-top: 16px; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: var(--border-radius-md); padding: 14px; color: #991b1b; font-size: 0.88rem;">
+                        <strong>⛔ Access Denied:</strong> <span id="errorMessageText">Entry rejected.</span>
                     </div>
                 </div>
             </div>
@@ -385,22 +398,23 @@
                 imageBlob = canvas.toDataURL('image/jpeg');
             }
 
-            logConsole('Executing Computer Vision pipeline: Bilateral Filter -> Morphological Localization -> Character OCR...');
+            logConsole('Processing frame and reading license plate...');
             btnScan.disabled = true;
 
-            // Extract simulated or real plate
-            // Default fallback if running offline
-            const samplePlates = ['KA01AB1234', 'MH12DE5678', 'DL04C4321', 'HR26DQ5551', 'KA04EF1234'];
-            let recognizedPlate = samplePlates[Math.floor(Math.random() * samplePlates.length)];
-
-            // Check if user has an active booking VRN
-            const activeVrnParam = '<%= (currentUser != null) ? "KA01AB1234" : "" %>';
-            if (activeVrnParam) recognizedPlate = activeVrnParam;
+            // Extract plate: Prioritize manual plate input if entered, otherwise sample or webcam
+            const manualPlateVal = document.getElementById('manualPlateInput') ? document.getElementById('manualPlateInput').value.trim().toUpperCase() : '';
+            let recognizedPlate = "";
+            if (manualPlateVal) {
+                recognizedPlate = manualPlateVal.replace(/[^A-Za-z0-9]/g, '');
+            } else {
+                const samplePlates = ['KA01AB1234', 'MH12DE5678', 'DL04C4321', 'HR26DQ5551', 'KA04EF1234'];
+                recognizedPlate = samplePlates[Math.floor(Math.random() * samplePlates.length)];
+            }
 
             setTimeout(async () => {
                 vrnDisplay.textContent = recognizedPlate.replace(/(.{2})(.{2})(.{2})(.{4})/, '$1 $2 $3 $4');
-                logConsole('Plate Recognized: ' + recognizedPlate + ' (Confidence: 98.4%)');
-                logConsole('Transmitting telemetry to IoT REST Gateway: /api/iot-sensor...');
+                logConsole('Plate Recognized / Entered: ' + recognizedPlate);
+                logConsole('Sending check-in request to /api/iot-sensor...');
 
                 try {
                     const formData = new URLSearchParams();
@@ -408,30 +422,49 @@
                     formData.append('status', 'OCCUPIED');
                     formData.append('sensorType', 'ANPR_CAMERA');
                     formData.append('vehicleNumber', recognizedPlate);
+                    formData.append('apiKey', 'DEMO_IOT_KEY_2026'); // Academic prototype API key
 
                     const resp = await fetch('<%= request.getContextPath() %>/api/iot-sensor', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        headers: { 
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-API-KEY': 'DEMO_IOT_KEY_2026'
+                        },
                         body: formData.toString()
                     });
 
                     const data = await resp.json();
                     logConsole('Server Response: ' + JSON.stringify(data));
 
-                    // Actuate Physical Servo Barrier
-                    barrierArm.classList.add('open');
-                    barrierBadge.className = 'status-pill open';
-                    barrierBadge.innerHTML = '<span>🟢</span> Barrier Open (Passed)';
-                    document.getElementById('successBanner').style.display = 'block';
+                    if (resp.ok && data.success) {
+                        // Actuate Physical Servo Barrier
+                        barrierArm.classList.add('open');
+                        barrierBadge.className = 'status-pill open';
+                        barrierBadge.innerHTML = '<span>🟢</span> Barrier Open (Passed)';
+                        document.getElementById('successBanner').style.display = 'block';
+                        if (document.getElementById('errorBanner')) document.getElementById('errorBanner').style.display = 'none';
 
-                    logConsole('Actuator Signal: SERVO_PULSE_OPEN -> Gate opened. Vehicle entering Bay ' + slotId);
+                        logConsole('✓ Gate authorized. Vehicle entering Bay ' + slotId);
 
-                    setTimeout(() => {
+                        setTimeout(() => {
+                            barrierArm.classList.remove('open');
+                            barrierBadge.className = 'status-pill closed';
+                            barrierBadge.innerHTML = '<span>🔴</span> Barrier Lowered (Closed)';
+                            logConsole('Vehicle passed. Barrier lowered.');
+                        }, 6000);
+                    } else {
+                        // Access Denied / Entry Rejected
                         barrierArm.classList.remove('open');
                         barrierBadge.className = 'status-pill closed';
-                        barrierBadge.innerHTML = '<span>🔴</span> Barrier Lowered (Locked)';
-                        logConsole('Vehicle cleared detection zone. Barrier lowered.');
-                    }, 6000);
+                        barrierBadge.innerHTML = '<span>🔴</span> Barrier Lowered (Access Denied)';
+                        document.getElementById('successBanner').style.display = 'none';
+                        const errMessage = data.error || data.message || 'Access Denied: Invalid reservation or unknown plate.';
+                        if (document.getElementById('errorBanner')) {
+                            document.getElementById('errorMessageText').textContent = errMessage;
+                            document.getElementById('errorBanner').style.display = 'block';
+                        }
+                        logConsole('⛔ ACCESS REJECTED: ' + errMessage);
+                    }
 
                 } catch (e) {
                     logConsole('Network communication warning: ' + e.message);
@@ -441,5 +474,27 @@
             }, 900);
         }
     </script>
+
+        <!-- Standardized Academic Footer -->
+    <footer class="footer" role="contentinfo">
+        <div class="footer-container">
+            <div>
+                <div class="footer-brand">SmartParking</div>
+                <div class="footer-sub">Smart Parking Management System • Academic Mini Project</div>
+                <div class="footer-sub" style="margin-top: 4px;">Developed with Java 17, JSP, Servlets, JDBC & MySQL</div>
+            </div>
+            <div style="text-align: right;">
+                <div class="footer-links" style="margin-bottom: 6px; justify-content: flex-end;">
+                    <a href="<%= request.getContextPath() %>/privacy.jsp">Privacy Policy</a>
+                    <a href="<%= request.getContextPath() %>/terms.jsp">Terms &amp; Conditions</a>
+                    <a href="<%= request.getContextPath() %>/cookies.jsp">Cookie Policy</a>
+                    <a href="<%= request.getContextPath() %>/refund.jsp">Refund Policy</a>
+                </div>
+                <div class="footer-sub">&copy; 2026 SmartParking. For Academic Demonstration.</div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="<%= request.getContextPath() %>/resources/js/cookieConsent.js"></script>
 </body>
 </html>

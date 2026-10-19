@@ -121,7 +121,7 @@ public class IoTSimulator implements Runnable {
             }
 
             // 3. Concurrency Safety Check: Is there an active driver booking or pending reservation?
-            psCheck = conn.prepareStatement("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND status IN ('PENDING', 'CONFIRMED', 'RESERVED', 'ACTIVE')");
+            psCheck = conn.prepareStatement("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND status IN ('PENDING', 'CONFIRMED', 'RESERVED', 'ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING')");
             psCheck.setString(1, candidateSlotId);
             rsCheck = psCheck.executeQuery();
 

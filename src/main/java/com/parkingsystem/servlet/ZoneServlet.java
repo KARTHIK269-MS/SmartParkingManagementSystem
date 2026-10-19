@@ -1,8 +1,10 @@
 package com.parkingsystem.servlet;
 
+import com.parkingsystem.dao.PredictionDAO;
 import com.parkingsystem.dao.SlotDAO;
 import com.parkingsystem.dao.ZoneDAO;
 import com.parkingsystem.exception.DatabaseException;
+import com.parkingsystem.model.OccupancyPrediction;
 import com.parkingsystem.model.Slot;
 import com.parkingsystem.model.Zone;
 import com.parkingsystem.util.JsonUtil;
@@ -15,6 +17,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.List;
+import java.util.Map;
 
 @WebServlet("/zones")
 public class ZoneServlet extends HttpServlet {
@@ -22,6 +25,7 @@ public class ZoneServlet extends HttpServlet {
 
     private final ZoneDAO zoneDAO = new ZoneDAO();
     private final SlotDAO slotDAO = new SlotDAO();
+    private final PredictionDAO predictionDAO = new PredictionDAO();
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
@@ -30,6 +34,11 @@ public class ZoneServlet extends HttpServlet {
         if (action == null || action.trim().isEmpty()) {
             action = "zones";
         }
+
+        // Synchronize physical slot statuses with active bookings
+        try {
+            slotDAO.syncSlotStatuses();
+        } catch (Exception ignored) {}
 
         switch (action) {
             case "slots":
@@ -52,7 +61,9 @@ public class ZoneServlet extends HttpServlet {
             throws ServletException, IOException {
         try {
             List<Zone> zones = zoneDAO.getAllZones();
+            Map<String, OccupancyPrediction> predictions = predictionDAO.getAllZonePredictions();
             request.setAttribute("zones", zones);
+            request.setAttribute("predictions", predictions);
             request.getRequestDispatcher("/zones.jsp").forward(request, response);
         } catch (DatabaseException e) {
             request.setAttribute("errorMessage", "Error loading parking zones: " + e.getMessage());

@@ -51,6 +51,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 isValid = false;
             }
 
+            // DPDP & Terms Consent
+            const termsConsent = document.getElementById('termsConsent');
+            if (termsConsent && !termsConsent.checked) {
+                showError(termsConsent, 'You must agree to the Terms, Privacy Policy (DPDP Act), and Cookie Policy to register.');
+                isValid = false;
+            }
+
             if (!isValid) {
                 e.preventDefault();
             }
@@ -114,6 +121,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const durationInput = document.getElementById('durationHours');
             if (durationInput && (parseInt(durationInput.value) < 1 || parseInt(durationInput.value) > 24)) {
                 showError(durationInput, 'Duration must be between 1 and 24 hours.');
+                isValid = false;
+            }
+
+            const bookingConsent = document.getElementById('bookingConsent');
+            if (bookingConsent && !bookingConsent.checked) {
+                showError(bookingConsent, 'You must accept the facility rules, grace period conditions, and cancellation policy to proceed.');
                 isValid = false;
             }
 

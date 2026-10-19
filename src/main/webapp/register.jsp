@@ -13,7 +13,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Driver Registration | Smart Parking Management System</title>
+    <meta name="description" content="Create a new SmartParking account to reserve parking bays across urban facilities.">
+    <title>SmartParking | Create Account</title>
+    <link rel="icon" type="image/svg+xml" href="<%= request.getContextPath() %>/resources/images/favicon.svg">
     <link rel="stylesheet" href="<%= request.getContextPath() %>/resources/css/style.css">
 </head>
 <body>
@@ -29,39 +31,41 @@
             <li><a href="<%= request.getContextPath() %>/login" class="nav-link">Sign In</a></li>
         </ul>
         <div class="nav-actions">
-            <a href="<%= request.getContextPath() %>/login" class="btn btn-secondary btn-sm">Already Registered? Sign In</a>
+            <a href="<%= request.getContextPath() %>/login" class="btn btn-secondary btn-sm">Sign In</a>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="container" style="max-width: 520px; margin-top: 32px; margin-bottom: 60px;">
-        <div class="card" style="padding: 36px 32px;">
-            <div style="text-align: center; margin-bottom: 24px;">
-                <h2 style="font-size: 1.6rem; font-weight: 800; color: var(--color-primary);">Create Driver Account</h2>
-                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px;">Join the intelligent parking network for guaranteed bay reservation</p>
+    <div class="container" style="max-width: 480px; margin-top: 32px; margin-bottom: 50px;">
+        <div class="card" style="padding: 32px 28px;">
+            <div style="text-align: center; margin-bottom: 22px;">
+                <h2 style="font-size: 1.45rem; font-weight: 700; color: var(--color-primary);">Create Driver Account</h2>
+                <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 4px;">Register to reserve parking bays and manage your permits</p>
             </div>
 
             <% if (error != null && !error.isEmpty()) { %>
                 <div class="alert alert-danger">
                     <span>⚠️</span>
-                    <div><%= error %></div>
+                    <div><%= com.parkingsystem.util.HtmlEscaper.escape(error) %></div>
                 </div>
             <% } %>
 
             <form id="registerForm" action="<%= request.getContextPath() %>/register" method="POST">
+                <input type="hidden" name="csrfToken" value="<%= com.parkingsystem.util.CsrfUtil.getToken(request) %>">
+
                 <div class="form-group">
                     <label class="form-label" for="name">Full Name</label>
-                    <input type="text" id="name" name="name" class="form-control" placeholder="e.g. Rahul Sharma" value="<%= enteredName %>" required>
+                    <input type="text" id="name" name="name" class="form-control" placeholder="e.g. Rahul Sharma" value="<%= com.parkingsystem.util.HtmlEscaper.escape(enteredName) %>" required>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label" for="email">Email Address</label>
-                    <input type="email" id="email" name="email" class="form-control" placeholder="rahul@example.com" value="<%= enteredEmail %>" required>
+                    <input type="email" id="email" name="email" class="form-control" placeholder="rahul@example.com" value="<%= com.parkingsystem.util.HtmlEscaper.escape(enteredEmail) %>" required>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label" for="phoneNumber">Mobile Number (10 digits)</label>
-                    <input type="tel" id="phoneNumber" name="phoneNumber" class="form-control" placeholder="9876543210" value="<%= enteredPhone %>">
+                    <input type="tel" id="phoneNumber" name="phoneNumber" class="form-control" placeholder="9876543210" value="<%= com.parkingsystem.util.HtmlEscaper.escape(enteredPhone) %>">
                 </div>
 
                 <div class="form-group">
@@ -74,31 +78,49 @@
                     <input type="password" id="confirmPassword" name="confirmPassword" class="form-control" placeholder="••••••••" required>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 14px; font-size: 1rem; padding: 14px;">
-                    Complete Registration
+                <div class="form-consent-group">
+                    <input type="checkbox" id="termsConsent" name="termsConsent" required>
+                    <label for="termsConsent">
+                        I agree to the 
+                        <a href="<%= request.getContextPath() %>/terms.jsp" target="_blank">Terms &amp; Conditions</a>, 
+                        <a href="<%= request.getContextPath() %>/privacy.jsp" target="_blank">Privacy Policy</a>, and 
+                        <a href="<%= request.getContextPath() %>/cookies.jsp" target="_blank">Cookie Policy</a>.
+                    </label>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 12px; font-size: 0.95rem; padding: 12px;">
+                    Register
                 </button>
             </form>
 
-            <div style="text-align: center; margin-top: 24px; font-size: 0.9rem; color: var(--text-muted);">
+            <div style="text-align: center; margin-top: 20px; font-size: 0.85rem; color: var(--text-muted);">
                 Already have an account? 
-                <a href="<%= request.getContextPath() %>/login" style="color: var(--color-accent); font-weight: 700;">Sign in here</a>
+                <a href="<%= request.getContextPath() %>/login" style="color: var(--color-accent); font-weight: 600;">Sign in here</a>
             </div>
         </div>
     </div>
 
-    <!-- Footer -->
-    <footer class="footer">
+    <!-- Standardized Academic Footer -->
+    <footer class="footer" role="contentinfo">
         <div class="footer-container">
             <div>
-                <strong>Smart Parking Management System</strong>
-                <div style="font-size: 0.82rem; margin-top: 4px;">Dynamic Web Application powered by Java 17 & Apache Tomcat 9</div>
+                <div class="footer-brand">SmartParking</div>
+                <div class="footer-sub">Smart Parking Management System • Academic Mini Project</div>
+                <div class="footer-sub" style="margin-top: 4px;">Developed with Java 17, JSP, Servlets, JDBC & MySQL</div>
             </div>
-            <div class="footer-sdg">
-                <span>🌱</span> Real-Time Smart Urban Mobility
+            <div style="text-align: right;">
+                <div class="footer-links" style="margin-bottom: 6px; justify-content: flex-end;">
+                    <a href="<%= request.getContextPath() %>/privacy.jsp">Privacy Policy</a>
+                    <a href="<%= request.getContextPath() %>/terms.jsp">Terms &amp; Conditions</a>
+                    <a href="<%= request.getContextPath() %>/cookies.jsp">Cookie Policy</a>
+                    <a href="<%= request.getContextPath() %>/refund.jsp">Refund Policy</a>
+                </div>
+                <div class="footer-sub">&copy; 2026 SmartParking. For Academic Demonstration.</div>
             </div>
         </div>
     </footer>
 
     <script src="<%= request.getContextPath() %>/resources/js/validation.js"></script>
+    <script src="<%= request.getContextPath() %>/resources/js/cookieConsent.js"></script>
 </body>
 </html>

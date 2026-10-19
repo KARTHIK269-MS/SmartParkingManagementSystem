@@ -22,8 +22,28 @@ public class ZoneDAO {
         try {
             conn = DBConnection.getConnection();
             String sql = "SELECT z.zone_id, z.name, z.location, z.hourly_rate, z.total_slots, z.description, " +
-                    "SUM(CASE WHEN s.status = 'AVAILABLE' THEN 1 ELSE 0 END) AS available_slots, " +
-                    "SUM(CASE WHEN s.status != 'AVAILABLE' THEN 1 ELSE 0 END) AS occupied_slots " +
+                    "SUM(CASE WHEN ( " +
+                    "    UPPER(s.status) = 'AVAILABLE' " +
+                    "    AND NOT EXISTS ( " +
+                    "        SELECT 1 FROM bookings b " +
+                    "        WHERE b.slot_id = s.slot_id " +
+                    "        AND ( " +
+                    "            b.status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') " +
+                    "            OR (b.status IN ('RESERVED', 'PENDING', 'CONFIRMED') AND (b.expires_at IS NULL OR b.expires_at > NOW())) " +
+                    "        ) " +
+                    "    ) " +
+                    ") THEN 1 ELSE 0 END) AS available_slots, " +
+                    "SUM(CASE WHEN NOT ( " +
+                    "    UPPER(s.status) = 'AVAILABLE' " +
+                    "    AND NOT EXISTS ( " +
+                    "        SELECT 1 FROM bookings b " +
+                    "        WHERE b.slot_id = s.slot_id " +
+                    "        AND ( " +
+                    "            b.status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') " +
+                    "            OR (b.status IN ('RESERVED', 'PENDING', 'CONFIRMED') AND (b.expires_at IS NULL OR b.expires_at > NOW())) " +
+                    "        ) " +
+                    "    ) " +
+                    ") THEN 1 ELSE 0 END) AS occupied_slots " +
                     "FROM zones z " +
                     "LEFT JOIN slots s ON z.zone_id = s.zone_id " +
                     "GROUP BY z.zone_id, z.name, z.location, z.hourly_rate, z.total_slots, z.description " +
@@ -60,8 +80,28 @@ public class ZoneDAO {
         try {
             conn = DBConnection.getConnection();
             String sql = "SELECT z.zone_id, z.name, z.location, z.hourly_rate, z.total_slots, z.description, " +
-                    "SUM(CASE WHEN s.status = 'AVAILABLE' THEN 1 ELSE 0 END) AS available_slots, " +
-                    "SUM(CASE WHEN s.status != 'AVAILABLE' THEN 1 ELSE 0 END) AS occupied_slots " +
+                    "SUM(CASE WHEN ( " +
+                    "    UPPER(s.status) = 'AVAILABLE' " +
+                    "    AND NOT EXISTS ( " +
+                    "        SELECT 1 FROM bookings b " +
+                    "        WHERE b.slot_id = s.slot_id " +
+                    "        AND ( " +
+                    "            b.status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') " +
+                    "            OR (b.status IN ('RESERVED', 'PENDING', 'CONFIRMED') AND (b.expires_at IS NULL OR b.expires_at > NOW())) " +
+                    "        ) " +
+                    "    ) " +
+                    ") THEN 1 ELSE 0 END) AS available_slots, " +
+                    "SUM(CASE WHEN NOT ( " +
+                    "    UPPER(s.status) = 'AVAILABLE' " +
+                    "    AND NOT EXISTS ( " +
+                    "        SELECT 1 FROM bookings b " +
+                    "        WHERE b.slot_id = s.slot_id " +
+                    "        AND ( " +
+                    "            b.status IN ('ACTIVE', 'OCCUPIED', 'PAYMENT_PENDING') " +
+                    "            OR (b.status IN ('RESERVED', 'PENDING', 'CONFIRMED') AND (b.expires_at IS NULL OR b.expires_at > NOW())) " +
+                    "        ) " +
+                    "    ) " +
+                    ") THEN 1 ELSE 0 END) AS occupied_slots " +
                     "FROM zones z " +
                     "LEFT JOIN slots s ON z.zone_id = s.zone_id " +
                     "WHERE z.zone_id = ? " +

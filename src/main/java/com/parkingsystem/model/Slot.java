@@ -77,7 +77,11 @@ public class Slot implements Serializable {
     }
 
     public boolean isBooked() {
-        return "BOOKED".equalsIgnoreCase(this.status);
+        return "BOOKED".equalsIgnoreCase(this.status) || "OCCUPIED".equalsIgnoreCase(this.status);
+    }
+
+    public boolean isOccupied() {
+        return "OCCUPIED".equalsIgnoreCase(this.status) || "BOOKED".equalsIgnoreCase(this.status);
     }
 
     public boolean isReserved() {
@@ -85,7 +89,7 @@ public class Slot implements Serializable {
     }
 
     public boolean isBlocked() {
-        return "BLOCKED".equalsIgnoreCase(this.status);
+        return "BLOCKED".equalsIgnoreCase(this.status) || "MAINTENANCE".equalsIgnoreCase(this.status);
     }
 
     @Override

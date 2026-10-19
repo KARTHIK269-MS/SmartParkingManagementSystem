@@ -1,24 +1,97 @@
-# Eclipse
+# ==============================================================================
+# Smart Parking Management System — Git Ignore Configuration
+# ==============================================================================
+
+# Database Credentials & Local Configuration (CRITICAL: Do Not Commit)
+db.properties
+**/db.properties
+config/application.properties
+config/db.properties
+.env
+.env.*
+*.local
+
+# Local Database Maintenance Scripts & Personal Snapshots
+database/clean_reset.sql
+
+# Java & Servlet Compiled Classes
+*.class
+src/main/webapp/WEB-INF/classes/
+bin/
+
+# Maven Build Output
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+# Build & Deployment Outputs
+build/
+*.war
+*.ear
+*.zip
+*.tar.gz
+
+# Backup folders & Temporary Archives
+backup-*/
+backup-before-final-qa/
+backup-before-final-qa/**
+backup-before-improvements/
+backup-before-improvements/**
+stage-clean-submission/
+stage-clean-submission/**
+
+# Eclipse IDE Configuration
 .classpath
 .project
 .settings/
+.metadata/
+*.launch
 
-# Maven build
-target/
+# IntelliJ IDEA & Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
 
-# Build output
-build/
+# Visual Studio Code
+.vscode/
 
-# Logs
-*.log
-
-# OS files
+# Operating System Files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Python
+# Logs & Temporary Files
+*.log
+logs/
+temp/
+scratch/
+*.tmp
+*.bak
+*.swp
+*~
+*.pdf
+
+# Python Virtual Environments & Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+venv/
+.env/
+env/
+.pytest_cache/
 
-# Java compiled files
-*.class
+# Local secrets and database files
+config/application.properties
+db.properties
+.env
+.env.*
+!.env.example
+*.sql.bak
+*.dump
+
+# Local database exports and generated packages
+*.war
+*.log
